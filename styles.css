@@ -1,0 +1,25 @@
+.caldav-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3em;
+  padding: 0 0.4em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: baseline;
+}
+.caldav-ref:hover { border-color: var(--interactive-accent); }
+.caldav-ref__icon { color: var(--text-muted); }
+.caldav-ref__when, .caldav-ref__recur { color: var(--text-muted); font-size: 0.85em; }
+.caldav-ref--done .caldav-ref__text { text-decoration: line-through; color: var(--text-muted); }
+.caldav-ref--overdue .caldav-ref__when { color: var(--text-error); }
+.caldav-ref--deleted, .caldav-ref--missing { color: var(--text-faint); border-style: dashed; }
+.caldav-ref--deleted .caldav-ref__text { text-decoration: line-through; }
+.caldav-ref--ambiguous { color: var(--text-warning); border-color: var(--text-warning); }
+.caldav-detail dt { color: var(--text-muted); font-size: 0.85em; margin-top: 0.6em; }
+.caldav-detail dd { margin: 0; white-space: pre-wrap; user-select: text; }
