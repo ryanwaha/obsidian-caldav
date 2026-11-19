@@ -25,3 +25,4 @@
 .caldav-detail dd { margin: 0; white-space: pre-wrap; user-select: text; }
 .caldav-ref--pending { border-style: dashed; color: var(--text-muted); }
 .caldav-ref--failed { color: var(--text-error); border-color: var(--text-error); }
+.caldav-pick__meta { color: var(--text-muted); }

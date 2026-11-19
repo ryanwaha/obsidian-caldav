@@ -2,8 +2,8 @@ import { type App, PluginSettingTab, Setting } from "obsidian";
 import type CalDavPlugin from "./main";
 import { normalizeServerUrl } from "./session";
 
-export interface Settings { serverUrl: string; username: string; syncIntervalMinutes: number }
-export const DEFAULT_SETTINGS: Settings = { serverUrl: "", username: "", syncIntervalMinutes: 5 };
+export interface Settings { serverUrl: string; username: string; syncIntervalMinutes: number; defaultCollection: string }
+export const DEFAULT_SETTINGS: Settings = { serverUrl: "", username: "", syncIntervalMinutes: 5, defaultCollection: "" };
 export const SECRET_ID = "obsidian-caldav-password";
 
 export class CalDavSettingTab extends PluginSettingTab {
@@ -36,6 +36,13 @@ export class CalDavSettingTab extends PluginSettingTab {
         if (Number.isFinite(n) && n >= 1) { s.syncIntervalMinutes = Math.round(n); await this.plugin.saveSettings(); }
       }));
 
+    const todoCols = this.plugin.todoCollections();
+    new Setting(containerEl).setName("新建任務的預設清單").setDesc(todoCols.length ? "" : "同步後才會列出清單")
+      .addDropdown((d) => {
+        for (const c of todoCols) d.addOption(c.href, c.displayName);
+        d.setValue(this.plugin.defaultCollectionHref() ?? "").onChange(async (x) => { s.defaultCollection = x; await this.plugin.saveSettings(); });
+      });
+
     containerEl.createEl("h3", { text: "同步狀態" });
     const status = containerEl.createDiv();
     const render = async () => {
@@ -43,7 +50,10 @@ export class CalDavSettingTab extends PluginSettingTab {
       for (const line of await this.plugin.statusLines()) status.createEl("div", { text: line });
     };
     void render();
-    new Setting(containerEl).addButton((b) => b.setButtonText("立即同步").setCta().onClick(async () => {
+    new Setting(containerEl).addButton((b) => b.setButtonText("重試失敗的待送").onClick(async () => {
+      b.setDisabled(true);
+      try { await this.plugin.retryFailed(); } finally { b.setDisabled(false); await render(); }
+    })).addButton((b) => b.setButtonText("立即同步").setCta().onClick(async () => {
       b.setDisabled(true);
       try { await this.plugin.syncNow(true); } finally { b.setDisabled(false); await render(); }
     }));
