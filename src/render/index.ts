@@ -67,6 +67,9 @@ export class MemoryIndex {
     return e;
   }
 
+  /** 已解析出「可能已搬移」：之後即使沒有資料變更，也要在每輪同步後重載，讓它轉成已刪除或已搬移。 */
+  hasMaybe(): boolean { for (const m of this.moves.values()) if (m.kind === "maybe") return true; return false; }
+
   /** 渲染器用：短 ID → RefView（含搬移解析）。 */
   view(id: string, label: string, now: Date): RefView {
     const { objs, tombs, pending, move } = this.get(id);

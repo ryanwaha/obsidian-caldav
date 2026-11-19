@@ -100,3 +100,20 @@ test("M5：tombstone 經 alias 解析成 moved；view() 產生 RefView", async (
   expect(idx.get("nnnnnnnn").move).toBeUndefined();
   expect(idx.collectionName("/t/")).toBe("t");
 });
+
+test("I1：hasMaybe 反映已解析的「可能已搬移」", async () => {
+  const c = await open();
+  await c.upsertObjects([{ ...obj("/c/old", "oooooooo"), uid: "old", created: "X" }]);
+  await c.removeObjects(["/c/old"], 10);
+  await c.putCollection({ href: "/c/", displayName: "c", components: ["VTODO"], lastSyncAt: 20 });
+  await c.putCollection({ href: "/t/", displayName: "t", components: ["VTODO"], lastSyncAt: 5 });
+  const idx = new MemoryIndex();
+  await idx.load(c);
+  expect(idx.hasMaybe()).toBe(false);
+  expect(idx.view("oooooooo", "", new Date()).state).toBe("maybe-moved");
+  expect(idx.hasMaybe()).toBe(true);
+  await c.putCollection({ href: "/t/", displayName: "t", components: ["VTODO"], lastSyncAt: 30 });
+  await idx.load(c);
+  expect(idx.view("oooooooo", "", new Date()).state).toBe("deleted");
+  expect(idx.hasMaybe()).toBe(false);
+});

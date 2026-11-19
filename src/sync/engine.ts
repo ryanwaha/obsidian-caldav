@@ -116,7 +116,8 @@ export class SyncEngine {
   /** 公開給「用伺服器的」：取得伺服器上最新版本寫入快取。 */
   async refreshObject(href: string, collection: string): Promise<void> {
     const cur = await this.client.get(href);
-    if (cur.status === 404) { await this.cache.removeObjects([href], this.now()); return; }
+    // deletedAt 用上一輪的開始時間：已在那之後同步過的集合不會讓它被誤判為「可能已搬移」
+    if (cur.status === 404) { await this.cache.removeObjects([href], this.last?.startedAt ?? this.now()); return; }
     if (cur.status !== 200) throw new Error(`取得伺服器版本失敗（HTTP ${cur.status}）`);
     const parsed = await parseResource(cur.ics, { href, etag: cur.etag ?? "", collection });
     if (!("skip" in parsed)) await this.cache.upsertObjects([parsed]);

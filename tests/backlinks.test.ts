@@ -113,3 +113,21 @@ test("資料夾改名與刪除：路徑前綴整批處理", () => {
   b.removeFolder("e");
   expect(b.notesFor("5cd3cmqd")).toEqual(["dx.md"]);
 });
+
+describe("review 修正", () => {
+  test("M1：空 frontmatter 不吞掉內文", () => {
+    expect(ids("---\n---\n" + R + "\n\n---\nx")).toEqual(["5cd3cmqd"]);
+  });
+  test("M2：跳脫的反引號不算行內程式碼", () => {
+    expect(ids("use \\` here " + R + " and ` later")).toEqual(["5cd3cmqd"]);
+  });
+  test("M3：HTML 註解裡的不算（和 live preview 一致）", () => {
+    expect(ids("<!-- " + R + " -->\n" + "a")).toEqual([]);
+  });
+  test("M6：rename 未索引的舊路徑回傳 false", () => {
+    const b = new BacklinkIndex();
+    expect(b.rename("x.txt", "x.md")).toBe(false);
+    b.setFile("a.md", R);
+    expect(b.rename("a.md", "b.md")).toBe(true);
+  });
+});

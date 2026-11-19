@@ -2,7 +2,7 @@ import { type RefMatch, findRefs } from "../render/refs";
 
 /**
  * 全文掃描 cal: 參照（反向索引與「更新參照」共用），排除不會被渲染成連結的區塊（§6.1）：
- * frontmatter、fenced code、行內程式碼、%% 註解。被排除的字元換成空白（保留換行與長度），
+ * frontmatter、fenced code、行內程式碼、%% 註解、HTML 註解。被排除的字元換成空白（保留換行與長度），
  * 再交給和渲染器相同的 findRefs，所以位置可以直接對回原文。
  * 有疑義時寧可多排除：漏掉的參照只是不會被改寫，誤改程式碼裡的範例才是傷害。
  */
@@ -18,7 +18,7 @@ function mask(text: string): string {
 
   // frontmatter：檔頭第一行是 ---，到下一個 --- 或 ... 為止
   let start = 0;
-  const fm = /^---[ \t]*\r?\n[\s\S]*?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(text);
+  const fm = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)??(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(text);
   if (fm) { blank(0, fm[0].length); start = fm[0].length; }
 
   // fenced code：容許任意縮排與引用前綴（清單、callout 裡的 code block）
@@ -43,10 +43,18 @@ function mask(text: string): string {
   }
   if (fence) blank(fence.from, text.length);
 
-  // 行內程式碼與 %% 註解：由左到右，先出現的先處理
+  // 行內程式碼、%% 註解、HTML 註解：由左到右，先出現的先處理
   const s = out.join("");
+  const escaped = (i: number) => { let k = 0; while (s[i - 1 - k] === "\\") k++; return k % 2 === 1; };
   for (let i = start; i < s.length;) {
-    if (s.startsWith("%%", i)) {
+    if (s.startsWith("<!--", i)) {
+      const end = s.indexOf("-->", i + 4);
+      const to = end === -1 ? s.length : end + 3;
+      blank(i, to);
+      i = to;
+    } else if (s[i] === "`" && escaped(i)) {
+      i++;
+    } else if (s.startsWith("%%", i)) {
       const end = s.indexOf("%%", i + 2);
       const to = end === -1 ? s.length : end + 2;
       blank(i, to);

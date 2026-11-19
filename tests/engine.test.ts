@@ -528,3 +528,14 @@ describe("搬移偵測（M5）", () => {
     expect(await resolveB(cache, "a")).toMatchObject({ kind: "deleted" });
   });
 });
+
+test("I1：refreshObject 收到 404 時，deletedAt 用上一輪開始時間", async () => {
+  const { engine, cache } = await setup({
+    [TEST]: xml(syncMs("t1", [{ href: `${TEST}a.ics`, ics: todo("a") }])),
+    [TASKS]: xml(syncMs("k1", [])),
+  });
+  const r = await engine.syncAll();
+  await engine.refreshObject(`${TEST}a.ics`, TEST); // 沒有 GET 路由 → 404
+  expect((await cache.allTombstones())[0].deletedAt).toBe(r.startedAt);
+  expect(new MoveResolver([], await cache.allTombstones(), [], await cache.getCollections()).resolve(await cache.allTombstones()).kind).toBe("deleted");
+});

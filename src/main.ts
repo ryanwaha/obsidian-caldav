@@ -34,6 +34,7 @@ export default class CalDavPlugin extends Plugin {
   readonly index = new MemoryIndex();
   readonly backlinks = new BacklinkIndex();
   private modifyTimers = new Map<string, number>();
+  private scanDone = false;
   private collections: CollectionInfo[] = [];
   private pendingUpdates = new Map<string, PendingUpdate>();
   private get collectionNames() { return new Map(this.collections.map((c) => [c.href, c.displayName])); }
@@ -87,11 +88,14 @@ export default class CalDavPlugin extends Plugin {
       }
       if (i % 50 === 49) await new Promise((r) => window.setTimeout(r, 0));
     }
+    this.scanDone = true;
     console.debug(`[obsidian-caldav] 反向索引：${files.length} 篇，${Date.now() - started} ms`);
   }
 
   private watchVault(): void {
     const isMd = (f: TAbstractFile): f is TFile => f instanceof TFile && f.extension === "md";
+    const cancel = (path: string) => { window.clearTimeout(this.modifyTimers.get(path)); this.modifyTimers.delete(path); };
+    const cancelUnder = (path: string) => { for (const p of [...this.modifyTimers.keys()]) if (p === path || p.startsWith(`${path}/`)) cancel(p); };
     const read = (f: TFile) => void this.app.vault.cachedRead(f).then((t) => this.backlinks.setFile(f.path, t), () => {});
     this.registerEvent(this.app.vault.on("create", (f) => { if (isMd(f)) read(f); }));
     this.registerEvent(this.app.vault.on("modify", (f) => {
@@ -100,12 +104,14 @@ export default class CalDavPlugin extends Plugin {
       this.modifyTimers.set(f.path, window.setTimeout(() => { this.modifyTimers.delete(f.path); read(f); }, 500));
     }));
     this.registerEvent(this.app.vault.on("delete", (f) => {
+      cancelUnder(f.path); // 刪除前 500 ms 內的修改不能把路徑加回來
       if (f instanceof TFolder) this.backlinks.removeFolder(f.path);
       else this.backlinks.removeFile(f.path);
     }));
     this.registerEvent(this.app.vault.on("rename", (f, old) => {
+      cancelUnder(old);
       if (f instanceof TFolder) this.backlinks.renameFolder(old, f.path);
-      else if (isMd(f)) this.backlinks.rename(old, f.path);
+      else if (isMd(f)) { if (!this.backlinks.rename(old, f.path)) read(f); }
       else this.backlinks.removeFile(old); // 改成非 .md
     }));
   }
@@ -125,6 +131,7 @@ export default class CalDavPlugin extends Plugin {
 
   /** P2：使用者確認後才改寫 .md。 */
   private updateMovedRefs(only?: { from: string; to: string }): void {
+    if (!this.scanDone) { new Notice("CalDAV：還在掃描筆記，請稍後再試（否則會漏掉部分參照）"); return; }
     const items = this.movedRewrites(only).filter((i) => i.notes.length);
     if (!items.length) { new Notice(only ? "CalDAV：沒有筆記參照這個短 ID（程式碼裡的不算）" : "CalDAV：沒有需要更新的參照"); return; }
     new UpdateRefsModal(this.app, items, () => void this.rewrite(items)).open();
@@ -178,7 +185,7 @@ export default class CalDavPlugin extends Plugin {
   async syncNow(notify: boolean, source = notify ? "手動" : "自動"): Promise<SyncReport | undefined> {
     const r = await this.sessions.sync(this.config());
     // 只有資料可能改變時才重載索引；否則每次回前景都會重繪所有 chip
-    if (!r || r.changed > 0 || r.removed > 0 || r.aliases > 0 || this.index.version === 0 || r.collections !== this.collections.length || r.sent > 0 || r.pendingQueued > 0 || r.pendingFailed > 0) await this.reloadIndex();
+    if (!r || r.changed > 0 || r.removed > 0 || r.aliases > 0 || this.index.hasMaybe() || this.index.version === 0 || r.collections !== this.collections.length || r.sent > 0 || r.pendingQueued > 0 || r.pendingFailed > 0) await this.reloadIndex();
     if (!r) {
       if (notify) new Notice("CalDAV：請先在設定頁填 Server URL、使用者名稱與密碼");
       return undefined;

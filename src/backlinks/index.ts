@@ -27,15 +27,17 @@ export class BacklinkIndex {
     this.emit();
   }
 
-  rename(from: string, to: string): void {
+  /** 回傳舊路徑是否在索引裡；不在時呼叫端要自己讀新檔（例如 .txt 改名成 .md）。 */
+  rename(from: string, to: string): boolean {
     const ids = this.byFile.get(from);
-    if (!ids) return;
+    if (!ids) return false;
     this.drop(from, ids);
     const existing = this.byFile.get(to);
     if (existing) this.drop(to, existing);
     this.byFile.set(to, ids);
     for (const id of ids) (this.byId.get(id) ?? this.byId.set(id, new Set()).get(id)!).add(to);
     this.emit();
+    return true;
   }
 
   /** 資料夾改名：底下所有已索引的檔案一起改路徑。 */
