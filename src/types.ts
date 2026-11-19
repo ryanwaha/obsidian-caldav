@@ -48,8 +48,9 @@ export interface SyncReport {
   errors: { collection?: string; message: string; name?: string }[];
 }
 
-/** 本機待送的新建（§4.2：重建快取時不能被清掉）。 */
+/** 本機待送的新建（§4.2：重建快取時不能被清掉）。舊資料沒有 op 欄位，視為 create。 */
 export interface PendingCreate {
+  op?: "create";
   uid: string; shortId: string;
   /** 建立時的帳號；換帳號後不送到新帳號 */
   fingerprint: string;
@@ -58,3 +59,23 @@ export interface PendingCreate {
   createdAt: number; attempts: number;
   state: "queued" | "failed"; lastError?: string;
 }
+
+/** 插件管理的欄位（§4.3）。date 為 null 表示清除日期。 */
+export interface Patch { summary?: string; done?: boolean; date?: { date: string; time?: string } | null }
+export interface Managed { summary: string; done: boolean; date?: string }
+
+/** 待送的修改：每個物件最多一筆（key 為 "upd:" + href），後來的修改合併進 patch。 */
+export interface PendingUpdate {
+  op: "update";
+  uid: string; objUid: string; shortId: string; fingerprint: string;
+  collection: string; href: string;
+  /** 修改前的伺服器版本：412 時用來判斷伺服器改了哪些欄位 */
+  baseIcs: string; baseEtag: string;
+  patch: Patch; summary: string;
+  createdAt: number; attempts: number;
+  state: "queued" | "failed" | "conflict"; lastError?: string;
+  conflict?: { serverIcs: string; serverEtag: string; base: Managed; mine: Managed; server: Managed };
+}
+
+export type PendingOp = PendingCreate | PendingUpdate;
+export const isUpdate = (p: PendingOp): p is PendingUpdate => p.op === "update";

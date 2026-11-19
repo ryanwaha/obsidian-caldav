@@ -5,14 +5,8 @@ import { epochIn, zonesOf } from "./parse";
 type Comp = InstanceType<typeof ICAL.Component>;
 type Prop = InstanceType<typeof ICAL.Property>;
 
-/** 插件管理的欄位（§4.3：只做輕量編輯）。date 為 null 表示清除日期。 */
-export interface Patch {
-  summary?: string;
-  done?: boolean;
-  date?: { date: string; time?: string } | null;
-}
-
-export interface Managed { summary: string; done: boolean; date?: string }
+import type { Managed, Patch } from "../types";
+export type { Managed, Patch };
 
 const TAIPEI_OFFSET = 8 * 3600_000; // E3：一律 Asia/Taipei
 const pad = (n: number) => String(n).padStart(2, "0");

@@ -283,3 +283,105 @@ describe("flush pending creates", () => {
     return { engine: new SyncEngine(new CalDavClient(SERVER, "Basic x", transport), cache), cache, calls };
   }
 });
+
+describe("flush pending updates", () => {
+  const base = todo("u1", "原標題", ["DUE;VALUE=DATE:20261124", "STATUS:NEEDS-ACTION"]);
+  const href = `${TEST}u1.ics`;
+  const U = (patch: object, extra: object = {}) => ({
+    op: "update" as const, uid: `upd:${href}`, objUid: "u1", shortId: "uuuuuuuu", fingerprint: "fp", collection: TEST, href,
+    baseIcs: base, baseEtag: '"b"', patch, summary: "原標題", createdAt: 1, attempts: 0, state: "queued" as const, ...extra,
+  });
+  async function make(routes: Record<string, Route | Route[]>) {
+    const { transport, calls } = fakeTransport({
+      "PROPFIND /": xml(radicale("propfind-principal.xml")),
+      "PROPFIND /ryanw/": (req: HttpRequest) => (req.body!.includes("calendar-home-set") ? xml(radicale("propfind-home-set.xml")) : xml(radicale("propfind-collections.xml"))),
+      [`REPORT ${TEST}`]: { status: 500, headers: {}, text: "" }, // 讓結果只反映 flush
+      [`REPORT ${TASKS}`]: xml(syncMs("k1", [])),
+      ...routes,
+    });
+    const cache = await CacheStore.open(`upd-${Math.random()}`, "fp");
+    stores.push(cache);
+    return { engine: new SyncEngine(new CalDavClient(SERVER, "Basic x", transport), cache), cache, calls };
+  }
+  const cached = async (cache: CacheStore) => cache.getObject(href);
+
+  test("2xx：PUT 帶 If-Match，寫入快取並移出佇列", async () => {
+    const t = await make({ [`PUT ${href}`]: { status: 204, headers: { Etag: '"n"' }, text: "" } });
+    await t.cache.enqueue(U({ summary: "新標題" }));
+    const r = await t.engine.syncAll();
+    const put = t.calls.find((c) => c.method === "PUT")!;
+    expect(put.headers?.["If-Match"]).toBe('"b"');
+    expect(put.body).toContain("SUMMARY:新標題");
+    expect(await t.cache.allPending()).toEqual([]);
+    expect(await cached(t.cache)).toMatchObject({ summary: "新標題", etag: '"n"' });
+    expect(r.sent).toBe(1);
+  });
+
+  test("412 且伺服器改的是別的欄位：自動合併重送", async () => {
+    const server = todo("u1", "原標題", ["DUE;VALUE=DATE:20261130", "STATUS:NEEDS-ACTION"]); // 別人改了日期
+    const t = await make({
+      [`PUT ${href}`]: [{ status: 412, headers: {}, text: "" }, { status: 204, headers: { Etag: '"m"' }, text: "" }],
+      [`GET ${href}`]: { status: 200, headers: { Etag: '"s"' }, text: server },
+    });
+    await t.cache.enqueue(U({ summary: "新標題" }));
+    await t.engine.syncAll();
+    const puts = t.calls.filter((c) => c.method === "PUT");
+    expect(puts).toHaveLength(2);
+    expect(puts[1].headers?.["If-Match"]).toBe('"s"');
+    expect(puts[1].body).toContain("SUMMARY:新標題");
+    expect(puts[1].body).toContain("DUE;VALUE=DATE:20261130"); // 保留別人的修改
+    expect(await t.cache.allPending()).toEqual([]);
+    expect(await cached(t.cache)).toMatchObject({ summary: "新標題", etag: '"m"' });
+  });
+
+  test("412 且伺服器也改了同一欄位：標為衝突，不覆蓋", async () => {
+    const server = todo("u1", "別人的標題", ["DUE;VALUE=DATE:20261124", "STATUS:NEEDS-ACTION"]);
+    const t = await make({
+      [`PUT ${href}`]: { status: 412, headers: {}, text: "" },
+      [`GET ${href}`]: { status: 200, headers: { Etag: '"s"' }, text: server },
+    });
+    await t.cache.enqueue(U({ summary: "我的標題" }));
+    await t.engine.syncAll();
+    expect(t.calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+    const [p] = await t.cache.allPending();
+    expect(p).toMatchObject({ state: "conflict" });
+    expect((p as any).conflict).toMatchObject({ serverEtag: '"s"', mine: { summary: "我的標題" }, server: { summary: "別人的標題" } });
+  });
+
+  test("412 但伺服器的值剛好和我的一樣：視為成功", async () => {
+    const server = todo("u1", "新標題", ["DUE;VALUE=DATE:20261124", "STATUS:NEEDS-ACTION"]);
+    const t = await make({
+      [`PUT ${href}`]: { status: 412, headers: {}, text: "" },
+      [`GET ${href}`]: { status: 200, headers: { Etag: '"s"' }, text: server },
+    });
+    await t.cache.enqueue(U({ summary: "新標題" }));
+    await t.engine.syncAll();
+    expect(await t.cache.allPending()).toEqual([]);
+  });
+
+  test("伺服器上已刪除（404）：標為失敗", async () => {
+    const t = await make({ [`PUT ${href}`]: { status: 412, headers: {}, text: "" }, [`GET ${href}`]: { status: 404, headers: {}, text: "" } });
+    await t.cache.enqueue(U({ summary: "x" }));
+    await t.engine.syncAll();
+    expect((await t.cache.allPending())[0]).toMatchObject({ state: "failed", lastError: "伺服器上已刪除" });
+  });
+
+  test("baseEtag 為空：先 GET 取得 etag 再寫", async () => {
+    const t = await make({
+      [`GET ${href}`]: { status: 200, headers: { Etag: '"s"' }, text: base },
+      [`PUT ${href}`]: { status: 204, headers: { Etag: '"n"' }, text: "" },
+    });
+    await t.cache.enqueue(U({ done: true }, { baseEtag: "" }));
+    await t.engine.syncAll();
+    const put = t.calls.find((c) => c.method === "PUT")!;
+    expect(put.headers?.["If-Match"]).toBe('"s"');
+    expect(await t.cache.allPending()).toEqual([]);
+  });
+
+  test("逾時：保留 queued", async () => {
+    const t = await make({ [`PUT ${href}`]: () => { throw new Error("timeout"); } });
+    await t.cache.enqueue(U({ summary: "x" }));
+    await t.engine.syncAll();
+    expect((await t.cache.allPending())[0]).toMatchObject({ state: "queued", attempts: 1 });
+  });
+});

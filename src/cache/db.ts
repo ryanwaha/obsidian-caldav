@@ -1,4 +1,4 @@
-import type { CalObject, CollectionInfo, PendingCreate, Tombstone } from "../types";
+import type { CalObject, CollectionInfo, PendingCreate, PendingOp, Tombstone } from "../types";
 
 const VERSION = 2;
 /** 衍生快取：換帳號時清空。pending 不在其中（§4.2）。 */
@@ -130,10 +130,10 @@ export class CacheStore {
     fn(tx.objectStore("pending"));
     await done(tx);
   }
-  enqueue(p: PendingCreate): Promise<void> { return this.writePending((os) => os.add(p)); }
-  updatePending(p: PendingCreate): Promise<void> { return this.writePending((os) => os.put(p)); }
-  removePending(uid: string): Promise<void> { return this.writePending((os) => os.delete(uid)); }
-  allPending(): Promise<PendingCreate[]> { return this.readAll("pending"); }
+  enqueue(p: PendingOp): Promise<void> { return this.writePending((os) => os.add(p)); }
+  updatePending(p: PendingOp): Promise<void> { return this.writePending((os) => os.put(p)); }
+  removePending(key: string): Promise<void> { return this.writePending((os) => os.delete(key)); }
+  allPending(): Promise<PendingOp[]> { return this.readAll("pending"); }
 
   count(): Promise<number> { return req(this.db.transaction("objects").objectStore("objects").count()); }
   close(): void { this.db.close(); }

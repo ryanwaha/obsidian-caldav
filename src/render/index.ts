@@ -1,5 +1,5 @@
 import type { CacheStore } from "../cache/db";
-import type { CalObject, PendingCreate, Tombstone } from "../types";
+import { type CalObject, type PendingCreate, type Tombstone, isUpdate } from "../types";
 
 const EMPTY = Object.freeze({
   objs: Object.freeze([]) as unknown as CalObject[],
@@ -26,7 +26,7 @@ export class MemoryIndex {
       const [os, ts, ps] = await Promise.all([cache.allObjects(), cache.allTombstones(), cache.allPending()]);
       for (const o of os) objs.set(o.shortId, [...(objs.get(o.shortId) ?? []), o]);
       for (const t of ts) tombs.set(t.shortId, [...(tombs.get(t.shortId) ?? []), t]);
-      for (const p of ps) pending.set(p.shortId, [...(pending.get(p.shortId) ?? []), p]);
+      for (const p of ps) if (!isUpdate(p)) pending.set(p.shortId, [...(pending.get(p.shortId) ?? []), p]);
     }
     this.objs = objs;
     this.tombs = tombs;
