@@ -98,6 +98,8 @@ export class CacheStore {
 
   findByShortId(id: string): Promise<CalObject[]> { return this.readAll("objects", "shortId", id); }
   findTombstonesByShortId(id: string): Promise<Tombstone[]> { return this.readAll("tombstones", "shortId", id); }
+  allObjects(): Promise<CalObject[]> { return this.readAll("objects"); }
+  allTombstones(): Promise<Tombstone[]> { return this.readAll("tombstones"); }
   count(): Promise<number> { return req(this.db.transaction("objects").objectStore("objects").count()); }
   close(): void { this.db.close(); }
 }
