@@ -28,3 +28,6 @@
 .caldav-pick__meta { color: var(--text-muted); }
 /* iOS WebKit：空白的 date/time 欄位寬度為 0，看不到也點不到 */
 .caldav-new-task input[type="date"], .caldav-new-task input[type="time"] { min-width: 9em; min-height: 2em; -webkit-appearance: none; appearance: none; }
+.caldav-ref__icon--toggle { cursor: pointer; }
+.caldav-ref__icon--toggle:hover { color: var(--interactive-accent); }
+.caldav-detail__conflict { border: 1px solid var(--text-warning); border-radius: var(--radius-s, 4px); padding: 0.5em; margin: 0.5em 0; }

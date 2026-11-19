@@ -1,3 +1,4 @@
+import { editable } from "../ical/editable";
 import type { RefView } from "./present";
 
 const ICON = (v: RefView) =>
@@ -11,7 +12,8 @@ type Handlers = { click: (e: MouseEvent) => void; mousedown: (e: MouseEvent) => 
 const bound = new WeakMap<HTMLElement, Handlers>();
 
 /** 把 el 填成一個參照 chip；可對同一元素重複呼叫。 */
-export function renderRef(el: HTMLElement, view: RefView, onClick: (view: RefView) => void): void {
+export function renderRef(el: HTMLElement, view: RefView, onClick: (view: RefView) => void, onToggle?: (view: RefView) => void): void {
+  const canToggle = !!onToggle && view.state === "ok" && !!view.obj && editable(view.obj).done;
   el.replaceChildren();
   el.className = "caldav-ref";
   el.classList.add(`caldav-ref--${view.state}`);
@@ -28,6 +30,7 @@ export function renderRef(el: HTMLElement, view: RefView, onClick: (view: RefVie
     el.appendChild(s);
   };
   part("icon", ICON(view));
+  if (canToggle) el.lastElementChild!.classList.add("caldav-ref__icon--toggle");
   part("text", view.text);
   if (view.when) part("when", view.when);
   if (view.recur) part("recur", view.recur);
@@ -35,7 +38,11 @@ export function renderRef(el: HTMLElement, view: RefView, onClick: (view: RefVie
   const old = bound.get(el);
   if (old) { el.removeEventListener("click", old.click); el.removeEventListener("mousedown", old.mousedown); }
   const h: Handlers = {
-    click: (e) => { e.preventDefault(); e.stopPropagation(); onClick(view); },
+    click: (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (canToggle && (e.target as HTMLElement).closest(".caldav-ref__icon")) onToggle!(view);
+      else onClick(view);
+    },
     // 避免 Live Preview 把游標移進參照而展開原文
     mousedown: (e) => { e.preventDefault(); e.stopPropagation(); },
   };

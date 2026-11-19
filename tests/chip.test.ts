@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { renderRef } from "../src/render/chip";
 import type { RefView } from "../src/render/present";
 
@@ -70,4 +70,27 @@ test("pending 與 failed", () => {
   expect(el.classList.contains("caldav-ref--pending")).toBe(true);
   renderRef(el, { state: "pending", id: "x", text: "新", kind: "VTODO", failed: true }, () => {});
   expect(el.classList.contains("caldav-ref--failed")).toBe(true);
+});
+
+describe("icon toggle", () => {
+  const obj = { href: "/h", collection: "/c/", etag: "", uid: "u", shortId: "x", kind: "VTODO" as const, summary: "s", hasOverrides: false, ics: "" };
+  test("可切換的任務：點圖示呼叫 onToggle，不開詳情", () => {
+    const el = document.createElement("span");
+    const click = vi.fn(), toggle = vi.fn();
+    renderRef(el, { ...ok, obj }, click, toggle);
+    (el.querySelector(".caldav-ref__icon") as HTMLElement).click();
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(click).not.toHaveBeenCalled();
+    (el.querySelector(".caldav-ref__text") as HTMLElement).click();
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(el.querySelector(".caldav-ref__icon")!.classList.contains("caldav-ref__icon--toggle")).toBe(true);
+  });
+  test("重複任務：點圖示開詳情", () => {
+    const el = document.createElement("span");
+    const click = vi.fn(), toggle = vi.fn();
+    renderRef(el, { ...ok, obj: { ...obj, rrule: "FREQ=WEEKLY" } }, click, toggle);
+    (el.querySelector(".caldav-ref__icon") as HTMLElement).click();
+    expect(toggle).not.toHaveBeenCalled();
+    expect(click).toHaveBeenCalledTimes(1);
+  });
 });

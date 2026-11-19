@@ -93,3 +93,17 @@ describe("managedValues", () => {
     expect(managedValues(vcal("BEGIN:VEVENT", "UID:e", "SUMMARY:會", "DTSTART;VALUE=DATE:20261120", "END:VEVENT"))).toEqual({ summary: "會", done: false, date: "20261120" });
   });
 });
+
+describe("提醒：形式改變時", () => {
+  const allDay = vcal("BEGIN:VTODO", "UID:a", "DUE;VALUE=DATE:20261124", "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER;VALUE=DATE-TIME:20261124T010000Z", "END:VALARM", "END:VTODO");
+  test("全天 → 有時間：提醒設在新的到期時間", () => {
+    expect(unfold(applyPatch(allDay, { date: { date: "2026-11-25", time: "10:00" } }, now))).toContain("TRIGGER;VALUE=DATE-TIME:20261125T020000Z");
+  });
+  test("有時間 → 全天：提醒設在新日期 09:00（台北）", () => {
+    const timed = vcal("BEGIN:VTODO", "UID:b", "DUE;TZID=Asia/Taipei:20261124T150000", "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER;VALUE=DATE-TIME:20261124T070000Z", "END:VALARM", "END:VTODO");
+    expect(unfold(applyPatch(timed, { date: { date: "2026-11-26" } }, now))).toContain("TRIGGER;VALUE=DATE-TIME:20261126T010000Z");
+  });
+  test("全天 → 全天：平移天數", () => {
+    expect(unfold(applyPatch(allDay, { date: { date: "2026-11-26" } }, now))).toContain("TRIGGER;VALUE=DATE-TIME:20261126T010000Z");
+  });
+});

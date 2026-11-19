@@ -1,5 +1,6 @@
 import { type App, type Editor, type EditorPosition, MarkdownView, type MarkdownFileInfo, type TFile, Modal, Notice, Plugin, Setting } from "obsidian";
 import { buildTodo } from "./ical/build";
+import { applyPatch } from "./ical/patch";
 import { parseResource } from "./ical/parse";
 import { shortId } from "./shortid";
 import { PickModal } from "./ui/pickModal";
@@ -17,7 +18,7 @@ import { requestUrlTransport } from "./caldav/requestUrlTransport";
 import { type Config, SessionManager } from "./session";
 import { CalDavSettingTab, DEFAULT_SETTINGS, SECRET_ID, type Settings } from "./settings";
 import { SyncEngine } from "./sync/engine";
-import type { CollectionInfo, SyncReport } from "./types";
+import { type CalObject, type CollectionInfo, type Patch, type PendingUpdate, type SyncReport, isUpdate } from "./types";
 
 export default class CalDavPlugin extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
@@ -29,6 +30,7 @@ export default class CalDavPlugin extends Plugin {
   private lastReport?: SyncReport;
   readonly index = new MemoryIndex();
   private collections: CollectionInfo[] = [];
+  private pendingUpdates = new Map<string, PendingUpdate>();
   private get collectionNames() { return new Map(this.collections.map((c) => [c.href, c.displayName])); }
 
   async onload() {
@@ -38,8 +40,8 @@ export default class CalDavPlugin extends Plugin {
     this.addCommand({ id: "insert-ref", name: "插入任務／事件參照", editorCallback: (editor) => this.insertRef(editor) });
     this.addCommand({ id: "new-task", name: "新建任務並插入參照", editorCallback: (editor, ctx) => this.newTask(editor, ctx) });
     this.addCommand({ id: "lookup-short-id", name: "以短 ID 查詢", callback: () => new LookupModal(this.app, this).open() });
-    this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v)));
-    this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v)));
+    this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v), (v) => this.toggleDone(v)));
+    this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v), (v) => this.toggleDone(v)));
     this.register(this.index.onChange(() => this.refreshEditors()));
     // iOS 從其他 App 切回時不一定觸發 visibilitychange，所以多聽幾種「回到前景」的訊號，15 秒內只同步一次
     this.registerDomEvent(document, "visibilitychange", () => { if (document.visibilityState === "visible") this.foregroundSync("visibilitychange"); });
@@ -113,6 +115,7 @@ export default class CalDavPlugin extends Plugin {
     try {
       const session = await this.sessions.get(this.config());
       this.collections = (await session?.cache.getCollections()) ?? [];
+      this.pendingUpdates = new Map(((await session?.cache.allPending()) ?? []).filter(isUpdate).map((p) => [p.href, p]));
       await this.index.load(session?.cache);
     } catch (e) {
       console.warn("[obsidian-caldav] 無法載入索引", e);
@@ -190,13 +193,58 @@ export default class CalDavPlugin extends Plugin {
     const session = await this.sessions.get(this.config());
     if (!session) return;
     for (const p of await session.cache.allPending()) {
-      if (p.state === "failed" && p.fingerprint === session.cache.fingerprint) await session.cache.updatePending({ ...p, state: "queued" });
+      if (p.state === "failed" && p.fingerprint === session.cache.fingerprint) await session.cache.updatePending({ ...p, state: "queued" } as typeof p);
     }
     await this.syncNow(true, "重試");
   }
 
   openDetail(view: RefView): void {
-    new DetailModal(this.app, view, (href) => this.collectionNames.get(href) ?? href).open();
+    new DetailModal(this.app, view, {
+      collectionName: (href) => this.collectionNames.get(href) ?? href,
+      pendingUpdate: view.obj && this.pendingUpdates.get(view.obj.href),
+      onSave: (obj, patch) => void this.editObject(obj, patch),
+      onResolve: (p, choice) => void this.resolveConflict(p, choice),
+    }).open();
+  }
+
+  private toggleDone(view: RefView): void {
+    if (view.obj) void this.editObject(view.obj, { done: !view.done });
+  }
+
+  /** 寫入待送修改（每個物件一筆，合併 patch）→ 樂觀更新快取 → 同步。 */
+  async editObject(obj: CalObject, patch: Patch): Promise<void> {
+    try {
+      const session = await this.sessions.get(this.config());
+      if (!session) { new Notice("CalDAV：尚未設定"); return; }
+      const key = `upd:${obj.href}`;
+      const existing = (await session.cache.allPending()).find((p): p is PendingUpdate => isUpdate(p) && p.uid === key);
+      const op: PendingUpdate = existing
+        ? { ...existing, patch: { ...existing.patch, ...patch }, summary: patch.summary ?? existing.summary }
+        : { op: "update", uid: key, objUid: obj.uid, shortId: obj.shortId, fingerprint: session.cache.fingerprint, collection: obj.collection, href: obj.href,
+            baseIcs: obj.ics, baseEtag: obj.etag, patch, summary: patch.summary ?? obj.summary, createdAt: Date.now(), attempts: 0, state: "queued" };
+      await session.cache.updatePending(op);
+      const optimistic = await parseResource(applyPatch(obj.ics, patch, new Date()), { href: obj.href, etag: obj.etag, collection: obj.collection });
+      if (!("skip" in optimistic)) await session.cache.upsertObjects([optimistic]);
+      await this.reloadIndex();
+      void this.syncNow(false, "編輯");
+    } catch (e) {
+      new Notice(`CalDAV：無法修改：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  private async resolveConflict(p: PendingUpdate, choice: "mine" | "server"): Promise<void> {
+    const session = await this.sessions.get(this.config());
+    if (!session || !p.conflict) return;
+    if (choice === "mine") {
+      // 以伺服器目前版本為新的基準，重新套用我的修改
+      await session.cache.updatePending({ ...p, baseIcs: p.conflict.serverIcs, baseEtag: p.conflict.serverEtag, state: "queued", conflict: undefined, lastError: undefined });
+      await this.syncNow(true, "衝突：用我的");
+    } else {
+      await session.cache.removePending(p.uid);
+      const server = await parseResource(p.conflict.serverIcs, { href: p.href, etag: p.conflict.serverEtag, collection: p.collection });
+      if (!("skip" in server)) await session.cache.upsertObjects([server]);
+      await this.reloadIndex();
+    }
   }
 
   async statusLines(): Promise<string[]> {
@@ -214,8 +262,9 @@ export default class CalDavPlugin extends Plugin {
       const pending = await session.cache.allPending();
       if (pending.length) {
         const mine = pending.filter((p) => p.fingerprint === session.cache.fingerprint);
-        lines.push(`待送：${mine.filter((p) => p.state === "queued").length}　失敗：${mine.filter((p) => p.state === "failed").length}${pending.length > mine.length ? `　屬於其他帳號：${pending.length - mine.length}` : ""}`);
-        for (const p of mine.filter((p) => p.state === "failed")) lines.push(`　✗ ${p.summary}（${p.lastError ?? "未知原因"}）`);
+        lines.push(`待送：${mine.filter((p) => p.state === "queued").length}　失敗：${mine.filter((p) => p.state === "failed").length}　衝突：${mine.filter((p) => p.state === "conflict").length}${pending.length > mine.length ? `　屬於其他帳號：${pending.length - mine.length}` : ""}`);
+        for (const p of mine.filter((p) => p.state === "failed")) lines.push(`　✗ ${isUpdate(p) ? "修改" : "新建"}「${p.summary}」（${p.lastError ?? "未知原因"}）`);
+        for (const p of mine.filter((p) => p.state === "conflict")) lines.push(`　⚠ 修改「${p.summary}」與伺服器衝突：點該參照開啟詳情選擇`);
       }
       if (this.triggers.length) lines.push("最近同步：", ...this.triggers.map((x) => `　${x}`));
       if (r?.skippedItems.length) lines.push(`略過（無法解析）：${r.skippedItems.map((s) => `${s.href}（${s.reason}）`).join("；")}`);

@@ -61,14 +61,14 @@ const inputEpoch = (i: { date: string; time?: string }) => {
   return Date.UTC(y, mo - 1, d, h, mi) - TAIPEI_OFFSET;
 };
 
-/** 絕對時間的提醒跟著平移；iOS 的位置提醒（X-APPLE-PROXIMITY）不動。 */
-function shiftAlarms(comp: Comp, delta: number): void {
+/** 絕對時間的提醒：to 為數字時直接設為該時間，否則平移 delta。iOS 的位置提醒（X-APPLE-PROXIMITY）不動。 */
+function shiftAlarms(comp: Comp, delta: number, to?: number): void {
   for (const alarm of comp.getAllSubcomponents("valarm")) {
     if (alarm.hasProperty("x-apple-proximity")) continue;
     const trig = alarm.getFirstProperty("trigger");
     if (!trig || trig.type !== "date-time") continue;
     const v = raw(trig)!;
-    const ms = Date.UTC(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8), +v.slice(9, 11), +v.slice(11, 13), +v.slice(13, 15)) + delta;
+    const ms = to ?? Date.UTC(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8), +v.slice(9, 11), +v.slice(11, 13), +v.slice(13, 15)) + delta;
     const t = new Date(ms);
     trig.setValue(ICAL.Time.fromData({ year: t.getUTCFullYear(), month: t.getUTCMonth() + 1, day: t.getUTCDate(), hour: t.getUTCHours(), minute: t.getUTCMinutes(), second: t.getUTCSeconds(), isDate: false }, ICAL.Timezone.utcTimezone));
   }
@@ -124,7 +124,10 @@ export function applyPatch(ics: string, patch: Patch, now: Date): string {
       if (patch.date.time) ensureTaipei(root);
       if (oldEpoch !== undefined) {
         const delta = newEpoch - oldEpoch;
-        shiftAlarms(comp, delta);
+        const formChanged = (oldProp!.type === "date") !== !patch.date.time;
+        // 形式改變（全天 ↔ 有時間）時平移沒有意義：比照 iOS，有時間提醒在到期時，全天提醒在當天 09:00
+        if (formChanged) shiftAlarms(comp, 0, patch.date.time ? newEpoch : newEpoch + 9 * 3600_000);
+        else shiftAlarms(comp, delta);
         const end = !isTodo ? comp.getFirstProperty("dtend") : null;
         if (end) {
           const endEpoch = epochOf(end, zones);

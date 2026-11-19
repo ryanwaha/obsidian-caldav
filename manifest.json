@@ -1,7 +1,7 @@
 {
   "id": "obsidian-caldav",
   "name": "CalDAV References",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "minAppVersion": "1.11.4",
   "description": "Inline references from notes to CalDAV tasks and events (CalDAV is the source of truth).",
   "author": "ryanw",

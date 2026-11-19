@@ -13,12 +13,12 @@ export type OnClick = (v: RefView) => void;
 export const refreshEffect = StateEffect.define<null>();
 
 class RefWidget extends WidgetType {
-  constructor(private id: string, private label: string, private version: number, private index: MemoryIndex, private onClick: OnClick) { super(); }
+  constructor(private id: string, private label: string, private version: number, private index: MemoryIndex, private onClick: OnClick, private onToggle: OnClick) { super(); }
   eq(other: RefWidget): boolean { return other.id === this.id && other.label === this.label && other.version === this.version; }
   toDOM(): HTMLElement {
     const el = document.createElement("span");
     const { objs, tombs, pending } = this.index.get(this.id);
-    renderRef(el, present(this.id, this.label, objs, tombs, new Date(), pending), this.onClick);
+    renderRef(el, present(this.id, this.label, objs, tombs, new Date(), pending), this.onClick, this.onToggle);
     return el;
   }
   ignoreEvent(): boolean { return true; }
@@ -32,13 +32,13 @@ function inCode(state: EditorState, pos: number): boolean {
   return false;
 }
 
-function build(view: EditorView, index: MemoryIndex, onClick: OnClick): DecorationSet {
+function build(view: EditorView, index: MemoryIndex, onClick: OnClick, onToggle: OnClick): DecorationSet {
   const b = new RangeSetBuilder<Decoration>();
   const { state } = view;
   if (!state.field(editorLivePreviewField, false)) return b.finish(); // 原始碼模式顯示原文
   try {
     for (const r of collectRefs(state, view.visibleRanges, state.selection.ranges, inCode)) {
-      b.add(r.from, r.to, Decoration.replace({ widget: new RefWidget(r.id, r.label, index.version, index, onClick), inclusive: true }));
+      b.add(r.from, r.to, Decoration.replace({ widget: new RefWidget(r.id, r.label, index.version, index, onClick, onToggle), inclusive: true }));
     }
     return b.finish();
   } catch (e) {
@@ -47,15 +47,15 @@ function build(view: EditorView, index: MemoryIndex, onClick: OnClick): Decorati
   }
 }
 
-export function livePreviewExtension(index: MemoryIndex, onClick: OnClick): Extension {
+export function livePreviewExtension(index: MemoryIndex, onClick: OnClick, onToggle: OnClick): Extension {
   const plugin = ViewPlugin.fromClass(class {
     decorations: DecorationSet;
-    constructor(view: EditorView) { this.decorations = build(view, index, onClick); }
+    constructor(view: EditorView) { this.decorations = build(view, index, onClick, onToggle); }
     update(u: ViewUpdate) {
       const modeChanged = u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false);
       const treeChanged = syntaxTree(u.startState) !== syntaxTree(u.state); // 長筆記背景解析完成
       if (u.docChanged || u.selectionSet || u.viewportChanged || modeChanged || treeChanged || u.transactions.some((t) => t.effects.some((e) => e.is(refreshEffect)))) {
-        this.decorations = build(u.view, index, onClick);
+        this.decorations = build(u.view, index, onClick, onToggle);
       }
     }
   }, { decorations: (v) => v.decorations });

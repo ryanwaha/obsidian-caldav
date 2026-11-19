@@ -2,7 +2,7 @@
 
 Inline references from Obsidian notes to CalDAV tasks and events. CalDAV stays the single source of truth; notes only hold `[label](cal:xxxxxxxx)` references.
 
-**Status: pre-alpha (M3).** 0.3.x syncs all calendar collections into a per-device IndexedDB cache, renders `[label](cal:xxxxxxxx)` references inline, lets you insert references to existing tasks/events, and create new tasks (queued locally when offline, sent on the next sync). Editing existing objects comes in M4.
+**Status: alpha (M4).** 0.4.x syncs all calendar collections into a per-device IndexedDB cache, renders `[label](cal:xxxxxxxx)` references inline, inserts references, creates tasks (offline-capable), and edits title / status / date. Edits patch the original iCalendar data and keep everything else; on a 412 the plugin merges automatically when the server changed other fields and asks you to choose when it changed the same field. Recurring events and per-occurrence overrides are edited in your calendar app.
 
 ## Install (BRAT)
 
@@ -14,7 +14,7 @@ Settings → server URL (`https://host:port`, no path; `.well-known` is not used
 
 Commands: **插入任務／事件參照**, **新建任務並插入參照**, **立即同步**, **以短 ID 查詢**.
 
-References inside inline code or code blocks are not rendered. Moving the cursor into a reference in Live Preview shows its source so the label can be edited.
+Click a task's checkbox icon to toggle completion; click elsewhere on a reference for details and editing. References inside inline code or code blocks are not rendered. Moving the cursor into a reference in Live Preview shows its source so the label can be edited.
 
 ## License
 
