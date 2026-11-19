@@ -1,4 +1,8 @@
-import { type App, Modal, Notice, Plugin, Setting } from "obsidian";
+import { type App, MarkdownView, Modal, Notice, Plugin, Setting } from "obsidian";
+import type { EditorView } from "@codemirror/view";
+import { MemoryIndex } from "./render/index";
+import { livePreviewExtension, refreshEffect } from "./render/livePreview";
+import type { RefView } from "./render/present";
 import { CacheStore } from "./cache/db";
 import { CalDavClient } from "./caldav/client";
 import { basicAuth } from "./caldav/http";
@@ -16,14 +20,21 @@ export default class CalDavPlugin extends Plugin {
   });
   private intervalId?: number;
   private lastReport?: SyncReport;
+  readonly index = new MemoryIndex();
 
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.addSettingTab(new CalDavSettingTab(this.app, this));
     this.addCommand({ id: "sync-now", name: "立即同步", callback: () => void this.syncNow(true) });
     this.addCommand({ id: "lookup-short-id", name: "以短 ID 查詢", callback: () => new LookupModal(this.app, this).open() });
+    this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v)));
+    this.register(this.index.onChange(() => this.refreshEditors()));
     this.registerDomEvent(document, "visibilitychange", () => { if (document.visibilityState === "visible") void this.syncNow(false); });
-    this.app.workspace.onLayoutReady(() => { this.resetInterval(); void this.syncNow(false); });
+    this.app.workspace.onLayoutReady(async () => {
+      this.resetInterval();
+      await this.reloadIndex(); // 先顯示快取（離線也可用），再同步
+      void this.syncNow(false);
+    });
   }
 
   onunload() { this.sessions.reset(); }
@@ -46,6 +57,7 @@ export default class CalDavPlugin extends Plugin {
 
   async syncNow(notify: boolean): Promise<SyncReport | undefined> {
     const r = await this.sessions.sync(this.config());
+    await this.reloadIndex();
     if (!r) {
       if (notify) new Notice("CalDAV：請先在設定頁填 Server URL、使用者名稱與密碼");
       return undefined;
@@ -58,6 +70,28 @@ export default class CalDavPlugin extends Plugin {
         : `CalDAV：已同步 ${r.objects} 筆（變更 ${r.changed}、刪除 ${r.removed}${r.skipped ? `、略過 ${r.skipped}` : ""}）`);
     }
     return r;
+  }
+
+  private async reloadIndex(): Promise<void> {
+    try {
+      const session = await this.sessions.get(this.config());
+      await this.index.load(session?.cache);
+    } catch (e) {
+      console.warn("[obsidian-caldav] 無法載入索引", e);
+    }
+  }
+
+  private refreshEditors(): void {
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (leaf.view instanceof MarkdownView) {
+        const cm = (leaf.view.editor as unknown as { cm?: EditorView }).cm;
+        cm?.dispatch({ effects: refreshEffect.of(null) });
+      }
+    });
+  }
+
+  openDetail(view: RefView): void {
+    new Notice(`${view.text}${view.when ? `｜${view.when}` : ""}`); // Task 6 換成 DetailModal
   }
 
   async statusLines(): Promise<string[]> {
