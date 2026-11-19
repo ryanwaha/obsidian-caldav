@@ -69,3 +69,23 @@ describe("CalDavClient", () => {
     expect(r.removed).toContain("/ryanw/test/85483CE1-1395-4CD0-BF87-7B32BA498B32.ics");
   });
 });
+
+describe("CalDavClient.put", () => {
+  test("If-None-Match 與 Content-Type；回傳 etag", async () => {
+    const { transport, calls } = fakeTransport({ "PUT /ryanw/test/n.ics": { status: 201, headers: { Etag: '"abc"' }, text: "" } });
+    const r = await new CalDavClient(SERVER, "Basic x", transport).put("/ryanw/test/n.ics", "BEGIN:VCALENDAR", { ifNoneMatch: true });
+    expect(r).toEqual({ status: 201, etag: '"abc"' });
+    expect(calls[0].headers).toMatchObject({ Authorization: "Basic x", "If-None-Match": "*", "Content-Type": "text/calendar; charset=utf-8" });
+    expect(calls[0].body).toBe("BEGIN:VCALENDAR");
+  });
+  test("If-Match；412 照實回傳", async () => {
+    const { transport, calls } = fakeTransport({ "PUT /ryanw/test/n.ics": { status: 412, headers: {}, text: "" } });
+    const r = await new CalDavClient(SERVER, "Basic x", transport).put("/ryanw/test/n.ics", "X", { ifMatch: '"e1"' });
+    expect(r.status).toBe(412);
+    expect(calls[0].headers?.["If-Match"]).toBe('"e1"');
+  });
+  test("401 → HttpError", async () => {
+    const { transport } = fakeTransport({ "PUT /ryanw/test/n.ics": { status: 401, headers: {}, text: "" } });
+    await expect(new CalDavClient(SERVER, "Basic x", transport).put("/ryanw/test/n.ics", "X", { ifNoneMatch: true })).rejects.toBeInstanceOf(HttpError);
+  });
+});

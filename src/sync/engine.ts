@@ -27,9 +27,10 @@ export class SyncEngine {
   }
 
   private async run(): Promise<SyncReport> {
-    const report: SyncReport = { startedAt: this.now(), finishedAt: 0, collections: 0, objects: 0, changed: 0, removed: 0, skipped: 0, skippedItems: [], errors: [] };
+    const report: SyncReport = { startedAt: this.now(), finishedAt: 0, collections: 0, objects: 0, changed: 0, removed: 0, skipped: 0, skippedItems: [], sent: 0, pendingQueued: 0, pendingFailed: 0, errors: [] };
     try {
       const { home } = await this.client.discover();
+      await this.flushPending(report);
       const server = await this.client.listCollections(home);
       const cached = new Map((await this.cache.getCollections()).map((c) => [c.href, c]));
       report.collections = server.length;
@@ -47,12 +48,47 @@ export class SyncEngine {
         }
       }
       report.objects = await this.cache.count();
+      const all = await this.cache.allPending();
+      report.pendingQueued = all.filter((p) => p.fingerprint === this.cache.fingerprint && p.state === "queued").length;
+      report.pendingFailed = all.length - report.pendingQueued;
     } catch (e) {
       report.errors.push(toError(e));
     }
     report.finishedAt = this.now();
     this.last = report;
     return report;
+  }
+
+  /** 送出待送的新建。網路或伺服器錯誤時停止本輪，留待下次。 */
+  private async flushPending(report: SyncReport): Promise<void> {
+    const queue = (await this.cache.allPending())
+      .filter((p) => p.fingerprint === this.cache.fingerprint && p.state === "queued")
+      .sort((a, b) => a.createdAt - b.createdAt);
+    for (const p of queue) {
+      let res: { status: number; etag?: string };
+      try {
+        res = await this.client.put(p.href, p.ics, { ifNoneMatch: true });
+      } catch (e) {
+        await this.cache.updatePending({ ...p, attempts: p.attempts + 1, lastError: toError(e).message });
+        report.errors.push(toError(e, p.collection));
+        return;
+      }
+      if (res.status === 201 || res.status === 204 || res.status === 412) {
+        // 412：UID 是本機隨機產生的，只可能是上次已送出但沒收到回應
+        if (res.status !== 412) {
+          const parsed = await parseResource(p.ics, { href: p.href, etag: res.etag ?? "", collection: p.collection });
+          if (!("skip" in parsed)) await this.cache.upsertObjects([parsed]);
+        }
+        await this.cache.removePending(p.uid);
+        report.sent++;
+      } else if (res.status >= 400 && res.status < 500) {
+        await this.cache.updatePending({ ...p, state: "failed", attempts: p.attempts + 1, lastError: `HTTP ${res.status}` });
+      } else {
+        await this.cache.updatePending({ ...p, attempts: p.attempts + 1, lastError: `HTTP ${res.status}` });
+        report.errors.push({ collection: p.collection, message: `送出新任務失敗（HTTP ${res.status}）` });
+        return;
+      }
+    }
   }
 
   private async syncOne(col: CollectionInfo, report: SyncReport): Promise<void> {

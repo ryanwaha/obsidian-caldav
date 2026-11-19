@@ -172,3 +172,79 @@ describe("SyncEngine", () => {
     expect(calls.filter((c) => c.method === "REPORT")).toHaveLength(4);
   });
 });
+
+describe("flush pending creates", () => {
+  const P = (uid: string, extra: Partial<import("../src/types").PendingCreate> = {}) => ({
+    uid, shortId: "pppppppp", fingerprint: "fp", collection: TEST, href: `${TEST}${uid}.ics`, ics: todo(uid, `新 ${uid}`),
+    summary: `新 ${uid}`, createdAt: 1, attempts: 0, state: "queued" as const, ...extra,
+  });
+
+  test("201：送出、寫入快取、清出佇列；PUT 在 REPORT 之前", async () => {
+    const put = { status: 201, headers: { ETag: '"new"' }, text: "" };
+    const t = await setupWithPut(put);
+    // 清單已同步過（有 token）：增量結果為空，驗證的是 flush 自己寫入快取
+    await t.cache.putCollection({ href: TEST, displayName: "測試", components: ["VTODO"], syncToken: "t0" });
+    await t.cache.enqueue(P("n1"));
+    const r = await t.engine.syncAll();
+    expect(r.sent).toBe(1);
+    expect(await t.cache.allPending()).toEqual([]);
+    expect((await t.cache.findByShortId(await shortId("n1")))[0]).toMatchObject({ summary: "新 n1", etag: '"new"' });
+    const methods = t.calls.map((c) => c.method);
+    expect(methods.indexOf("PUT")).toBeLessThan(methods.indexOf("REPORT"));
+    expect(r).toMatchObject({ pendingQueued: 0, pendingFailed: 0 });
+  });
+
+  test("412：視為已送出", async () => {
+    const t = await setupWithPut({ status: 412, headers: {}, text: "" });
+    await t.cache.enqueue(P("n1"));
+    const r = await t.engine.syncAll();
+    expect(r.sent).toBe(1);
+    expect(await t.cache.allPending()).toEqual([]);
+  });
+
+  test("403：標為失敗並保留", async () => {
+    const t = await setupWithPut({ status: 403, headers: {}, text: "" });
+    await t.cache.enqueue(P("n1"));
+    const r = await t.engine.syncAll();
+    expect(r.sent).toBe(0);
+    expect(await t.cache.allPending()).toEqual([expect.objectContaining({ uid: "n1", state: "failed", lastError: "HTTP 403", attempts: 1 })]);
+    expect(r.pendingFailed).toBe(1);
+  });
+
+  test("逾時：保留 queued、停止本輪 flush", async () => {
+    const t = await setupWithPut(() => { throw new Error("timeout"); });
+    await t.cache.enqueue(P("n1", { createdAt: 1 }));
+    await t.cache.enqueue(P("n2", { createdAt: 2 }));
+    const r = await t.engine.syncAll();
+    expect(t.calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+    expect(t.calls.find((c) => c.method === "PUT")!.url).toContain("n1.ics");
+    const ps = await t.cache.allPending();
+    expect(ps.every((p) => p.state === "queued")).toBe(true);
+    expect(ps.find((p) => p.uid === "n1")!.attempts).toBe(1);
+    expect(r.errors.some((e) => e.message.includes("timeout"))).toBe(true);
+    expect(r.pendingQueued).toBe(2);
+  });
+
+  test("其他帳號的待送：不送、不動，計入 failed", async () => {
+    const t = await setupWithPut({ status: 201, headers: {}, text: "" });
+    await t.cache.enqueue(P("n1", { fingerprint: "other" }));
+    const r = await t.engine.syncAll();
+    expect(t.calls.some((c) => c.method === "PUT")).toBe(false);
+    expect((await t.cache.allPending())[0]).toMatchObject({ state: "queued", attempts: 0 });
+    expect(r.pendingFailed).toBe(1);
+  });
+
+  async function setupWithPut(put: Route) {
+    const { transport, calls } = fakeTransport({
+      "PROPFIND /": xml(radicale("propfind-principal.xml")),
+      "PROPFIND /ryanw/": (req: HttpRequest) => (req.body!.includes("calendar-home-set") ? xml(radicale("propfind-home-set.xml")) : xml(radicale("propfind-collections.xml"))),
+      [`REPORT ${TEST}`]: xml(syncMs("t1", [])),
+      [`REPORT ${TASKS}`]: xml(syncMs("k1", [])),
+      [`PUT ${TEST}n1.ics`]: put,
+      [`PUT ${TEST}n2.ics`]: put,
+    });
+    const cache = await CacheStore.open(`flush-${Math.random()}`, "fp");
+    stores.push(cache);
+    return { engine: new SyncEngine(new CalDavClient(SERVER, "Basic x", transport), cache), cache, calls };
+  }
+});

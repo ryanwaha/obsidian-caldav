@@ -39,6 +39,10 @@ export interface SyncReport {
   startedAt: number; finishedAt: number;
   collections: number; objects: number;
   changed: number; removed: number; skipped: number;
+  /** 本輪送出的待送新建 */
+  sent: number;
+  /** 本輪結束時，仍在佇列（queued）與失敗（failed，含屬於其他帳號）的數量 */
+  pendingQueued: number; pendingFailed: number;
   /** 無法解析而略過的資源；已在快取的保留舊版，不視為刪除 */
   skippedItems: { href: string; reason: string }[];
   errors: { collection?: string; message: string; name?: string }[];
