@@ -72,6 +72,7 @@ export class DetailModal extends Modal {
     if (view.state !== "ok" && view.state !== "moved") row("狀態", view.ambiguity === "move" ? "搬移後有多筆相符：請選擇要指向哪一筆" : STATE_TEXT[view.state] ?? view.state);
     if (view.state === "moved" && view.obj) {
       const box = contentEl.createDiv({ cls: "caldav-detail__note" });
+      contentEl.insertBefore(box, dl); // 搬移說明放在欄位之前
       box.createSpan({ text: `已從〈${opts.collectionName(view.movedFrom ?? "")}〉搬到〈${opts.collectionName(view.obj.collection)}〉。筆記裡仍是舊的短 ID ${view.id}，在這台裝置靠本機紀錄解析；其他裝置可能看不到。` });
       if (opts.onRewrite) {
         const to = view.obj.shortId;

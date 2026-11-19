@@ -23,10 +23,13 @@ class RefWidget extends WidgetType {
   ignoreEvent(): boolean { return true; }
 }
 
-/** 位置是否在程式碼裡（行內程式碼或 code block）。節點名稱見 M2 ledger。 */
+/**
+ * 位置是否在不渲染連結的區塊裡：程式碼（行內或 code block，節點名稱見 M2 ledger）、frontmatter、%% 註解。
+ * 和反向索引的掃描（backlinks/scan.ts）排除的範圍一致；閱讀模式本來就不會把這些變成連結。
+ */
 function inCode(state: EditorState, pos: number): boolean {
   for (let node: { name: string; parent: unknown } | null = syntaxTree(state).resolveInner(pos, 1); node; node = node.parent as typeof node) {
-    if (/code/i.test(node.name)) return true;
+    if (/code|frontmatter|comment/i.test(node.name)) return true;
   }
   return false;
 }
