@@ -1,8 +1,9 @@
-import type { CalObject, CollectionInfo, Tombstone } from "../types";
+import type { CalObject, CollectionInfo, PendingCreate, Tombstone } from "../types";
 
-const VERSION = 1;
-const STORES = ["meta", "collections", "objects", "tombstones"] as const;
-type StoreName = (typeof STORES)[number];
+const VERSION = 2;
+/** 衍生快取：換帳號時清空。pending 不在其中（§4.2）。 */
+const CACHE_STORES = ["meta", "collections", "objects", "tombstones"] as const;
+type StoreName = (typeof CACHE_STORES)[number] | "pending";
 
 function req<T>(r: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
@@ -17,26 +18,33 @@ function done(tx: IDBTransaction): Promise<void> {
 
 /** 每台裝置一份的衍生快取（設計稿 §4.2）。不放進 vault。 */
 export class CacheStore {
-  private constructor(private db: IDBDatabase) {}
+  private constructor(private db: IDBDatabase, readonly fingerprint: string) {}
 
   /** fingerprint 不同（換了伺服器或帳號）就清空全部再寫入新的。 */
   static async open(name: string, fingerprint: string): Promise<CacheStore> {
     const open = indexedDB.open(name, VERSION);
-    open.onupgradeneeded = () => {
+    open.onupgradeneeded = (e) => {
       const db = open.result;
-      db.createObjectStore("meta");
-      db.createObjectStore("collections", { keyPath: "href" });
-      const objs = db.createObjectStore("objects", { keyPath: "href" });
-      objs.createIndex("shortId", "shortId");
-      objs.createIndex("collection", "collection");
-      db.createObjectStore("tombstones", { keyPath: "href" }).createIndex("shortId", "shortId");
+      if (e.oldVersion < 1) {
+        db.createObjectStore("meta");
+        db.createObjectStore("collections", { keyPath: "href" });
+        const objs = db.createObjectStore("objects", { keyPath: "href" });
+        objs.createIndex("shortId", "shortId");
+        objs.createIndex("collection", "collection");
+        db.createObjectStore("tombstones", { keyPath: "href" }).createIndex("shortId", "shortId");
+      }
+      if (e.oldVersion < 2) {
+        db.createObjectStore("pending", { keyPath: "uid" }).createIndex("shortId", "shortId");
+      }
     };
-    const store = new CacheStore(await req(open));
-    const tx = store.db.transaction([...STORES], "readwrite");
+    const db = await req(open);
+    db.onversionchange = () => db.close();
+    const store = new CacheStore(db, fingerprint);
+    const tx = store.db.transaction([...CACHE_STORES], "readwrite");
     const meta = tx.objectStore("meta");
     const current = await req(meta.get("fingerprint"));
     if (current !== fingerprint) {
-      for (const s of STORES) tx.objectStore(s).clear();
+      for (const s of CACHE_STORES) tx.objectStore(s).clear();
       meta.put(fingerprint, "fingerprint");
     }
     await done(tx);
@@ -100,6 +108,16 @@ export class CacheStore {
   findTombstonesByShortId(id: string): Promise<Tombstone[]> { return this.readAll("tombstones", "shortId", id); }
   allObjects(): Promise<CalObject[]> { return this.readAll("objects"); }
   allTombstones(): Promise<Tombstone[]> { return this.readAll("tombstones"); }
+  private async writePending(fn: (os: IDBObjectStore) => void): Promise<void> {
+    const tx = this.db.transaction("pending", "readwrite");
+    fn(tx.objectStore("pending"));
+    await done(tx);
+  }
+  enqueue(p: PendingCreate): Promise<void> { return this.writePending((os) => os.add(p)); }
+  updatePending(p: PendingCreate): Promise<void> { return this.writePending((os) => os.put(p)); }
+  removePending(uid: string): Promise<void> { return this.writePending((os) => os.delete(uid)); }
+  allPending(): Promise<PendingCreate[]> { return this.readAll("pending"); }
+
   count(): Promise<number> { return req(this.db.transaction("objects").objectStore("objects").count()); }
   close(): void { this.db.close(); }
 }

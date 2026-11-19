@@ -79,3 +79,59 @@ describe("CacheStore", () => {
     expect(await s.findTombstonesByShortId("dddddddd")).toEqual([]);
   });
 });
+
+describe("pending queue (db v2)", () => {
+  const pending = (uid: string, extra: Partial<import("../src/types").PendingCreate> = {}) => ({
+    uid, shortId: "pppppppp", fingerprint: "srv|ryanw", collection: "/c/", href: `/c/${uid}.ics`, ics: "BEGIN:VCALENDAR",
+    summary: `S ${uid}`, createdAt: 1, attempts: 0, state: "queued" as const, ...extra,
+  });
+
+  test("從 v1 資料庫升級：資料保留，可 enqueue", async () => {
+    const name = fresh();
+    await new Promise<void>((resolve, reject) => {
+      const r = indexedDB.open(name, 1);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        db.createObjectStore("meta");
+        db.createObjectStore("collections", { keyPath: "href" });
+        const o = db.createObjectStore("objects", { keyPath: "href" });
+        o.createIndex("shortId", "shortId"); o.createIndex("collection", "collection");
+        db.createObjectStore("tombstones", { keyPath: "href" }).createIndex("shortId", "shortId");
+      };
+      r.onsuccess = () => {
+        const db = r.result;
+        const tx = db.transaction(["meta", "objects"], "readwrite");
+        tx.objectStore("meta").put("srv|ryanw", "fingerprint");
+        tx.objectStore("objects").put(obj("/a.ics", "aaaaaaaa"));
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+      r.onerror = () => reject(r.error);
+    });
+    const s = await open(name, "srv|ryanw");
+    expect(await s.count()).toBe(1);
+    await s.enqueue(pending("p1"));
+    expect((await s.allPending()).map((p) => p.uid)).toEqual(["p1"]);
+  });
+
+  test("enqueue / update / remove", async () => {
+    const s = await open(fresh());
+    await s.enqueue(pending("p1"));
+    await s.updatePending(pending("p1", { state: "failed", lastError: "HTTP 403", attempts: 1 }));
+    expect((await s.allPending())[0]).toMatchObject({ state: "failed", lastError: "HTTP 403", attempts: 1 });
+    await s.removePending("p1");
+    expect(await s.allPending()).toEqual([]);
+  });
+
+  test("換 fingerprint：快取清空，待送保留", async () => {
+    const name = fresh();
+    let s = await open(name, "A");
+    await s.upsertObjects([obj("/a.ics", "aaaaaaaa")]);
+    await s.enqueue(pending("p1", { fingerprint: "A" }));
+    s.close();
+    s = await open(name, "B");
+    expect(s.fingerprint).toBe("B");
+    expect(await s.count()).toBe(0);
+    expect((await s.allPending()).map((p) => p.uid)).toEqual(["p1"]);
+  });
+});

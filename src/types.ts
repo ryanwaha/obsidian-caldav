@@ -43,3 +43,14 @@ export interface SyncReport {
   skippedItems: { href: string; reason: string }[];
   errors: { collection?: string; message: string; name?: string }[];
 }
+
+/** 本機待送的新建（§4.2：重建快取時不能被清掉）。 */
+export interface PendingCreate {
+  uid: string; shortId: string;
+  /** 建立時的帳號；換帳號後不送到新帳號 */
+  fingerprint: string;
+  collection: string; href: string; ics: string;
+  summary: string; due?: DateValue;
+  createdAt: number; attempts: number;
+  state: "queued" | "failed"; lastError?: string;
+}
