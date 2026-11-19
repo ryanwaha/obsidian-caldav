@@ -44,7 +44,7 @@ function build(view: EditorView, index: MemoryIndex, onClick: OnClick): Decorati
   if (!state.field(editorLivePreviewField, false)) return b.finish(); // 原始碼模式顯示原文
   try {
     for (const r of collectRefs(state, view.visibleRanges, state.selection.ranges, inCode)) {
-      b.add(r.from, r.to, Decoration.replace({ widget: new RefWidget(r.id, r.label, index.version, index, onClick) }));
+      b.add(r.from, r.to, Decoration.replace({ widget: new RefWidget(r.id, r.label, index.version, index, onClick), inclusive: true }));
     }
     return b.finish();
   } catch (e) {

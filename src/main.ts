@@ -33,7 +33,12 @@ export default class CalDavPlugin extends Plugin {
     this.registerEditorExtension(livePreviewExtension(this.index, (v, reveal) => this.openDetail(v, reveal)));
     this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v)));
     this.register(this.index.onChange(() => this.refreshEditors()));
-    this.registerDomEvent(document, "visibilitychange", () => { if (document.visibilityState === "visible") void this.syncNow(false); });
+    // iOS 從其他 App 切回時不一定觸發 visibilitychange，所以多聽幾種「回到前景」的訊號，15 秒內只同步一次
+    this.registerDomEvent(document, "visibilitychange", () => { if (document.visibilityState === "visible") this.foregroundSync("visibilitychange"); });
+    this.registerDomEvent(window, "focus", () => this.foregroundSync("focus"));
+    this.registerDomEvent(window, "pageshow", () => this.foregroundSync("pageshow"));
+    this.registerDomEvent(document, "resume" as keyof DocumentEventMap, () => this.foregroundSync("resume"));
+    this.registerEvent(this.app.workspace.on("file-open", () => this.foregroundSync("file-open")));
     this.app.workspace.onLayoutReady(async () => {
       this.resetInterval();
       await this.reloadIndex(); // 先顯示快取（離線也可用），再同步
@@ -43,7 +48,7 @@ export default class CalDavPlugin extends Plugin {
         const d = new Date().toDateString();
         if (d !== day) { day = d; this.index.touch(); }
       }, 60_000));
-      void this.syncNow(false);
+      void this.syncNow(false, "啟動");
     });
   }
 
@@ -56,7 +61,7 @@ export default class CalDavPlugin extends Plugin {
 
   private resetInterval() {
     if (this.intervalId !== undefined) window.clearInterval(this.intervalId);
-    this.intervalId = this.registerInterval(window.setInterval(() => void this.syncNow(false), this.settings.syncIntervalMinutes * 60_000));
+    this.intervalId = this.registerInterval(window.setInterval(() => void this.syncNow(false, "定時"), this.settings.syncIntervalMinutes * 60_000));
   }
 
   private config(): Config | undefined {
@@ -65,7 +70,17 @@ export default class CalDavPlugin extends Plugin {
     return serverUrl && username && password ? { serverUrl, username, password } : undefined;
   }
 
-  async syncNow(notify: boolean): Promise<SyncReport | undefined> {
+  private lastForeground = 0;
+  private triggers: string[] = [];
+
+  private foregroundSync(source: string): void {
+    const now = Date.now();
+    if (now - this.lastForeground < 15_000) return;
+    this.lastForeground = now;
+    void this.syncNow(false, source);
+  }
+
+  async syncNow(notify: boolean, source = notify ? "手動" : "自動"): Promise<SyncReport | undefined> {
     const r = await this.sessions.sync(this.config());
     // 只有資料可能改變時才重載索引；否則每次回前景都會重繪所有 chip
     if (!r || r.changed > 0 || r.removed > 0 || this.index.version === 0 || r.collections !== this.collectionNames.size) await this.reloadIndex();
@@ -74,6 +89,9 @@ export default class CalDavPlugin extends Plugin {
       return undefined;
     }
     this.lastReport = r;
+    const t = new Date();
+    this.triggers.unshift(`${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")} ${source}：變更 ${r.changed}、刪除 ${r.removed}${r.errors.length ? "、有錯誤" : ""}`);
+    this.triggers.length = Math.min(this.triggers.length, 8);
     if (r.errors.length) console.warn("[obsidian-caldav] 同步錯誤", r.errors);
     if (notify) {
       new Notice(r.errors.length
@@ -118,6 +136,7 @@ export default class CalDavPlugin extends Plugin {
         `清單：${cols.map((c) => c.displayName).join("、") || "—"}`,
       ];
       if (r?.errors.length) lines.push(`最近錯誤：${r.errors.map((e) => `${e.collection ?? ""} ${e.message}`.trim()).join("；")}`);
+      if (this.triggers.length) lines.push("最近同步：", ...this.triggers.map((x) => `　${x}`));
       if (r?.skippedItems.length) lines.push(`略過（無法解析）：${r.skippedItems.map((s) => `${s.href}（${s.reason}）`).join("；")}`);
       return lines;
     } catch (e) {
