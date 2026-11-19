@@ -1,5 +1,5 @@
 import ICAL from "ical.js";
-import { type App, Modal, Setting } from "obsidian";
+import { type App, Modal } from "obsidian";
 import type { CalObject } from "../types";
 import { type RefView, formatDate } from "./present";
 import { describeRrule } from "./recur";
@@ -16,7 +16,7 @@ function description(o: CalObject): string | undefined {
 }
 
 export class DetailModal extends Modal {
-  constructor(app: App, private view: RefView, private collectionName: (href: string) => string, private reveal?: () => void) { super(app); }
+  constructor(app: App, private view: RefView, private collectionName: (href: string) => string) { super(app); }
 
   onOpen() {
     const { contentEl, view } = this;
@@ -40,10 +40,6 @@ export class DetailModal extends Modal {
       row("UID", o.uid);
     }
     row("短 ID", view.id);
-    if (this.reveal) {
-      const reveal = this.reveal;
-      new Setting(contentEl).addButton((b) => b.setButtonText("顯示原文（編輯標籤）").onClick(() => { this.close(); reveal(); }));
-    }
   }
 
   onClose() { this.contentEl.empty(); }

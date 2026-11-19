@@ -30,7 +30,7 @@ export default class CalDavPlugin extends Plugin {
     this.addSettingTab(new CalDavSettingTab(this.app, this));
     this.addCommand({ id: "sync-now", name: "立即同步", callback: () => void this.syncNow(true) });
     this.addCommand({ id: "lookup-short-id", name: "以短 ID 查詢", callback: () => new LookupModal(this.app, this).open() });
-    this.registerEditorExtension(livePreviewExtension(this.index, (v, reveal) => this.openDetail(v, reveal)));
+    this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v)));
     this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v)));
     this.register(this.index.onChange(() => this.refreshEditors()));
     // iOS 從其他 App 切回時不一定觸發 visibilitychange，所以多聽幾種「回到前景」的訊號，15 秒內只同步一次
@@ -120,8 +120,8 @@ export default class CalDavPlugin extends Plugin {
     });
   }
 
-  openDetail(view: RefView, reveal?: () => void): void {
-    new DetailModal(this.app, view, (href) => this.collectionNames.get(href) ?? href, reveal).open();
+  openDetail(view: RefView): void {
+    new DetailModal(this.app, view, (href) => this.collectionNames.get(href) ?? href).open();
   }
 
   async statusLines(): Promise<string[]> {

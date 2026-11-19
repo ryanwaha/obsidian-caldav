@@ -7,8 +7,7 @@ import type { MemoryIndex } from "./index";
 import { type RefView, present } from "./present";
 import { collectRefs } from "./viewRefs";
 
-/** 點擊 chip 的回呼；reveal 會把游標移進參照，顯示原文以便編輯標籤。 */
-export type OnClick = (v: RefView, reveal?: () => void) => void;
+export type OnClick = (v: RefView) => void;
 
 /** 索引更新時，由 main.ts 對每個編輯器 dispatch，觸發重繪。 */
 export const refreshEffect = StateEffect.define<null>();
@@ -16,15 +15,10 @@ export const refreshEffect = StateEffect.define<null>();
 class RefWidget extends WidgetType {
   constructor(private id: string, private label: string, private version: number, private index: MemoryIndex, private onClick: OnClick) { super(); }
   eq(other: RefWidget): boolean { return other.id === this.id && other.label === this.label && other.version === this.version; }
-  toDOM(view: EditorView): HTMLElement {
+  toDOM(): HTMLElement {
     const el = document.createElement("span");
     const { objs, tombs } = this.index.get(this.id);
-    const reveal = () => {
-      const pos = view.posAtDOM(el);
-      view.dispatch({ selection: { anchor: pos + 1 } });
-      view.focus();
-    };
-    renderRef(el, present(this.id, this.label, objs, tombs, new Date()), (v) => this.onClick(v, reveal));
+    renderRef(el, present(this.id, this.label, objs, tombs, new Date()), this.onClick);
     return el;
   }
   ignoreEvent(): boolean { return true; }
