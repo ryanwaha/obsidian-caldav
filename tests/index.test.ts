@@ -83,3 +83,37 @@ test("pending 也可用短 ID 查到", async () => {
   expect(idx.get("pppppppp").pending.map((p) => p.uid)).toEqual(["n1"]);
   expect(idx.get("zzzzzzzz").pending).toEqual([]);
 });
+
+test("M5：tombstone 經 alias 解析成 moved；view() 產生 RefView", async () => {
+  const c = await open();
+  const o = { ...obj("/t/new", "nnnnnnnn"), collection: "/t/", uid: "new", summary: "改名後" };
+  const old = { ...obj("/c/old", "oooooooo"), uid: "old" };
+  await c.upsertObjects([old, o]);
+  await c.removeObjects(["/c/old"], 1);
+  await c.putAliases([{ fromUid: "old", fromShortId: "oooooooo", toUid: "new", toShortId: "nnnnnnnn", detectedAt: 1 }]);
+  await c.putCollection({ href: "/c/", displayName: "c", components: ["VTODO"], lastSyncAt: 5 });
+  await c.putCollection({ href: "/t/", displayName: "t", components: ["VTODO"], lastSyncAt: 5 });
+  const idx = new MemoryIndex();
+  await idx.load(c);
+  expect(idx.get("oooooooo").move).toMatchObject({ kind: "moved", obj: { uid: "new" } });
+  expect(idx.view("oooooooo", "", new Date())).toMatchObject({ state: "moved", text: "改名後", movedFrom: "/c/" });
+  expect(idx.get("nnnnnnnn").move).toBeUndefined();
+  expect(idx.collectionName("/t/")).toBe("t");
+});
+
+test("I1：hasMaybe 反映已解析的「可能已搬移」", async () => {
+  const c = await open();
+  await c.upsertObjects([{ ...obj("/c/old", "oooooooo"), uid: "old", created: "X" }]);
+  await c.removeObjects(["/c/old"], 10);
+  await c.putCollection({ href: "/c/", displayName: "c", components: ["VTODO"], lastSyncAt: 20 });
+  await c.putCollection({ href: "/t/", displayName: "t", components: ["VTODO"], lastSyncAt: 5 });
+  const idx = new MemoryIndex();
+  await idx.load(c);
+  expect(idx.hasMaybe()).toBe(false);
+  expect(idx.view("oooooooo", "", new Date()).state).toBe("maybe-moved");
+  expect(idx.hasMaybe()).toBe(true);
+  await c.putCollection({ href: "/t/", displayName: "t", components: ["VTODO"], lastSyncAt: 30 });
+  await idx.load(c);
+  expect(idx.view("oooooooo", "", new Date()).state).toBe("deleted");
+  expect(idx.hasMaybe()).toBe(false);
+});

@@ -65,7 +65,7 @@ export class SessionManager {
     try {
       session = await this.get(cfg);
     } catch (e) {
-      return { startedAt: now, finishedAt: Date.now(), collections: 0, objects: 0, changed: 0, removed: 0, skipped: 0, skippedItems: [], sent: 0, pendingQueued: 0, pendingFailed: 0,
+      return { startedAt: now, finishedAt: Date.now(), collections: 0, objects: 0, changed: 0, removed: 0, skipped: 0, skippedItems: [], sent: 0, aliases: 0, pendingQueued: 0, pendingFailed: 0,
         errors: [{ message: `無法開啟本機快取：${e instanceof Error ? e.message : String(e)}`, name: e instanceof Error ? e.name : undefined }] };
     }
     if (!session) return undefined;

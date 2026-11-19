@@ -94,3 +94,29 @@ describe("icon toggle", () => {
     expect(click).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("M5 狀態", () => {
+  const obj = { href: "/b/n.ics", collection: "/b/", etag: '"1"', uid: "n", shortId: "nnnnnnnn", kind: "VTODO" as const, summary: "交週報", hasOverrides: false, ics: "" };
+  test("moved：照常顯示圖示、可切換完成，並加註已搬移", () => {
+    const el = document.createElement("span");
+    const toggle = vi.fn(), click = vi.fn();
+    renderRef(el, { state: "moved", id: "oldoldol", text: "交週報", kind: "VTODO", done: false, obj, movedFrom: "/a/" }, click, toggle);
+    expect(el.classList.contains("caldav-ref--moved")).toBe(true);
+    expect(el.querySelector(".caldav-ref__icon")!.textContent).toBe("☐");
+    expect(el.querySelector(".caldav-ref__moved")!.textContent).toBe("↪");
+    expect(el.title).toContain("已搬移");
+    (el.querySelector(".caldav-ref__icon") as HTMLElement).click();
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(click).not.toHaveBeenCalled();
+  });
+  test("maybe-moved：… 圖示，加註可能已搬移，不可切換", () => {
+    const el = document.createElement("span");
+    const toggle = vi.fn(), click = vi.fn();
+    renderRef(el, { state: "maybe-moved", id: "oldoldol", text: "舊標題" }, click, toggle);
+    expect(el.querySelector(".caldav-ref__icon")!.textContent).toBe("…");
+    expect(el.querySelector(".caldav-ref__when")!.textContent).toBe("可能已搬移");
+    (el.querySelector(".caldav-ref__icon") as HTMLElement).click();
+    expect(toggle).not.toHaveBeenCalled();
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+});

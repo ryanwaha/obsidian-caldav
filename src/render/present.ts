@@ -1,5 +1,6 @@
 import ICAL from "ical.js";
 import { epochIn, zonesOf } from "../ical/parse";
+import type { Resolution } from "../sync/moves";
 import type { CalObject, DateValue, PendingCreate, Tombstone } from "../types";
 import { describeRrule } from "./recur";
 
@@ -16,6 +17,10 @@ export interface RefView {
   /** pending 且伺服器拒收 */
   failed?: boolean;
   candidates?: CalObject[];
+  /** ambiguous 的成因：短 ID 撞號，或搬移比對到多筆 */
+  ambiguity?: "shortid" | "move";
+  /** moved：舊物件所在的集合 href */
+  movedFrom?: string;
   obj?: CalObject;
 }
 
@@ -109,7 +114,7 @@ function computeNext(obj: CalObject, now: Date): DateValue | undefined {
   return undefined;
 }
 
-export function present(id: string, label: string, objs: CalObject[], tombs: Tombstone[], now: Date, pending: PendingCreate[] = []): RefView {
+export function present(id: string, label: string, objs: CalObject[], tombs: Tombstone[], now: Date, pending: PendingCreate[] = [], move?: Resolution): RefView {
   if (objs.length === 0 && pending.length) {
     const p = pending[0];
     const view: RefView = { state: "pending", id, text: label || p.summary || "（無標題）", kind: "VTODO", done: false };
@@ -117,12 +122,18 @@ export function present(id: string, label: string, objs: CalObject[], tombs: Tom
     if (p.state === "failed") view.failed = true;
     return view;
   }
-  if (objs.length > 1) return { state: "ambiguous", id, text: `有歧義（${objs.length} 筆）`, candidates: objs };
+  if (objs.length > 1) return { state: "ambiguous", ambiguity: "shortid", id, text: `有歧義（${objs.length} 筆）`, candidates: objs };
   if (objs.length === 0) {
+    if (move?.kind === "moved") return { ...liveView(id, label, move.obj, now), state: "moved", movedFrom: move.from.collection };
+    if (move?.kind === "ambiguous") return { state: "ambiguous", ambiguity: "move", id, text: `${label || move.from.summary || "（無標題）"}：搬移後有 ${move.candidates.length} 筆相符`, candidates: move.candidates };
+    if (move?.kind === "maybe") return { state: "maybe-moved", id, text: label || move.from.summary || "（無標題）" };
     if (tombs.length) return { state: "deleted", id, text: label || tombs[0].summary || "（無標題）" };
     return { state: "missing", id, text: label || "查無此物" };
   }
-  const o = objs[0];
+  return liveView(id, label, objs[0], now);
+}
+
+function liveView(id: string, label: string, o: CalObject, now: Date): RefView {
   const view: RefView = { state: "ok", id, text: label || o.summary || "（無標題）", kind: o.kind, obj: o };
   if (o.rrule) view.recur = describeRrule(o.rrule);
   let date: DateValue | undefined;

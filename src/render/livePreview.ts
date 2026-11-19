@@ -4,7 +4,7 @@ import { type EditorState, type Extension, Prec, RangeSetBuilder, StateEffect } 
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { renderRef } from "./chip";
 import type { MemoryIndex } from "./index";
-import { type RefView, present } from "./present";
+import type { RefView } from "./present";
 import { collectRefs } from "./viewRefs";
 
 export type OnClick = (v: RefView) => void;
@@ -17,17 +17,19 @@ class RefWidget extends WidgetType {
   eq(other: RefWidget): boolean { return other.id === this.id && other.label === this.label && other.version === this.version; }
   toDOM(): HTMLElement {
     const el = document.createElement("span");
-    const { objs, tombs, pending } = this.index.get(this.id);
-    renderRef(el, present(this.id, this.label, objs, tombs, new Date(), pending), this.onClick, this.onToggle);
+    renderRef(el, this.index.view(this.id, this.label, new Date()), this.onClick, this.onToggle);
     return el;
   }
   ignoreEvent(): boolean { return true; }
 }
 
-/** 位置是否在程式碼裡（行內程式碼或 code block）。節點名稱見 M2 ledger。 */
+/**
+ * 位置是否在不渲染連結的區塊裡：程式碼（行內或 code block，節點名稱見 M2 ledger）、frontmatter、%% 註解。
+ * 和反向索引的掃描（backlinks/scan.ts）排除的範圍一致；閱讀模式本來就不會把這些變成連結。
+ */
 function inCode(state: EditorState, pos: number): boolean {
   for (let node: { name: string; parent: unknown } | null = syntaxTree(state).resolveInner(pos, 1); node; node = node.parent as typeof node) {
-    if (/code/i.test(node.name)) return true;
+    if (/code|frontmatter|comment/i.test(node.name)) return true;
   }
   return false;
 }
