@@ -35,5 +35,7 @@ export interface SyncReport {
   startedAt: number; finishedAt: number;
   collections: number; objects: number;
   changed: number; removed: number; skipped: number;
-  errors: { collection?: string; message: string }[];
+  /** 無法解析而略過的資源；已在快取的保留舊版，不視為刪除 */
+  skippedItems: { href: string; reason: string }[];
+  errors: { collection?: string; message: string; name?: string }[];
 }

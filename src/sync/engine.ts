@@ -3,7 +3,12 @@ import { type CalDavClient, type SyncResult, TokenExpiredError } from "../caldav
 import { parseResource } from "../ical/parse";
 import type { CalObject, CollectionInfo, SyncReport } from "../types";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const toError = (e: unknown, collection?: string) => {
+  const err: SyncReport["errors"][number] = { message: e instanceof Error ? e.message : String(e) };
+  if (collection) err.collection = collection;
+  if (e instanceof Error || e instanceof DOMException) err.name = (e as Error).name;
+  return err;
+};
 
 export class SyncEngine {
   private running?: Promise<SyncReport>;
@@ -22,7 +27,7 @@ export class SyncEngine {
   }
 
   private async run(): Promise<SyncReport> {
-    const report: SyncReport = { startedAt: this.now(), finishedAt: 0, collections: 0, objects: 0, changed: 0, removed: 0, skipped: 0, errors: [] };
+    const report: SyncReport = { startedAt: this.now(), finishedAt: 0, collections: 0, objects: 0, changed: 0, removed: 0, skipped: 0, skippedItems: [], errors: [] };
     try {
       const { home } = await this.client.discover();
       const server = await this.client.listCollections(home);
@@ -38,13 +43,13 @@ export class SyncEngine {
         try {
           await this.syncOne({ ...col, syncToken: cached.get(col.href)?.syncToken, lastSyncAt: cached.get(col.href)?.lastSyncAt }, report);
         } catch (e) {
-          report.errors.push({ collection: col.href, message: message(e) });
+          report.errors.push(toError(e, col.href));
         }
       }
+      report.objects = await this.cache.count();
     } catch (e) {
-      report.errors.push({ message: message(e) });
+      report.errors.push(toError(e));
     }
-    report.objects = await this.cache.count();
     report.finishedAt = this.now();
     this.last = report;
     return report;
@@ -66,8 +71,9 @@ export class SyncEngine {
     for (const ch of result.changed) {
       const parsed = await parseResource(ch.ics, { href: ch.href, etag: ch.etag, collection: col.href });
       if ("skip" in parsed) {
+        // 伺服器上仍存在，不寫刪除紀錄；快取裡有舊版就保留舊版
         report.skipped++;
-        toRemove.add(ch.href); // 已不是可用的物件；不在快取裡時 removeObjects 會忽略
+        report.skippedItems.push({ href: ch.href, reason: parsed.skip });
         console.warn(`[obsidian-caldav] 略過 ${ch.href}：${parsed.skip}`);
       } else {
         upserts.push(parsed);

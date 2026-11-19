@@ -136,7 +136,7 @@ describe("SyncEngine", () => {
     expect(await ok.cache.count()).toBe(1);
   });
 
-  test("無法解析的資源：skipped 計數，其他照寫；原本在快取的會被移除", async () => {
+  test("無法解析的資源：skipped 記錄原因；已在快取的保留舊版、不寫刪除紀錄", async () => {
     const { engine, cache } = await setup({
       [TEST]: [
         xml(syncMs("t1", [{ href: `${TEST}a.ics`, ics: todo("a") }, { href: `${TEST}b.ics`, ics: todo("b") }])),
@@ -147,8 +147,19 @@ describe("SyncEngine", () => {
     await engine.syncAll();
     const r = await engine.syncAll();
     expect(r.skipped).toBe(2);
-    expect(r.removed).toBe(1);
-    expect(await cache.hrefsInCollection(TEST)).toEqual([`${TEST}a.ics`]);
+    expect(r.removed).toBe(0);
+    expect(r.skippedItems.map((s) => s.href).sort()).toEqual([`${TEST}b.ics`, `${TEST}z.ics`]);
+    expect(r.skippedItems.every((s) => s.reason.length > 0)).toBe(true);
+    expect((await cache.hrefsInCollection(TEST)).sort()).toEqual([`${TEST}a.ics`, `${TEST}b.ics`]);
+    expect(await cache.findTombstonesByShortId(await shortId("b"))).toEqual([]);
+  });
+
+  test("快取連線已關閉：syncAll 回傳帶錯誤的 report，不 reject", async () => {
+    const { engine, cache } = await setup({ [TEST]: xml(syncMs("t1", [])), [TASKS]: xml(syncMs("k1", [])) });
+    cache.close();
+    const r = await engine.syncAll();
+    expect(r.errors.length).toBeGreaterThan(0);
+    expect(engine.lastReport).toBe(r);
   });
 
   test("single-flight：同時呼叫兩次只跑一輪", async () => {

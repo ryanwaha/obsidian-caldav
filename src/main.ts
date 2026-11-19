@@ -3,16 +3,19 @@ import { CacheStore } from "./cache/db";
 import { CalDavClient } from "./caldav/client";
 import { basicAuth } from "./caldav/http";
 import { requestUrlTransport } from "./caldav/requestUrlTransport";
+import { type Config, SessionManager } from "./session";
 import { CalDavSettingTab, DEFAULT_SETTINGS, SECRET_ID, type Settings } from "./settings";
 import { SyncEngine } from "./sync/engine";
 import type { SyncReport } from "./types";
 
 export default class CalDavPlugin extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
-  private cache?: CacheStore;
-  private engine?: SyncEngine;
-  private engineKey?: string;
+  private sessions = new SessionManager(async (cfg, fingerprint) => {
+    const cache = await CacheStore.open(`obsidian-caldav-${(this.app as App & { appId: string }).appId}`, fingerprint);
+    return { cache, engine: new SyncEngine(new CalDavClient(cfg.serverUrl, basicAuth(cfg.username, cfg.password), requestUrlTransport()), cache) };
+  });
   private intervalId?: number;
+  private lastReport?: SyncReport;
 
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -23,7 +26,7 @@ export default class CalDavPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => { this.resetInterval(); void this.syncNow(false); });
   }
 
-  onunload() { this.cache?.close(); }
+  onunload() { this.sessions.reset(); }
 
   async saveSettings() {
     await this.saveData(this.settings);
@@ -35,27 +38,19 @@ export default class CalDavPlugin extends Plugin {
     this.intervalId = this.registerInterval(window.setInterval(() => void this.syncNow(false), this.settings.syncIntervalMinutes * 60_000));
   }
 
-  /** 設定齊全時回傳（必要時重建）同步引擎；fingerprint 變了就用新的快取。 */
-  private async ensureEngine(): Promise<SyncEngine | undefined> {
-    const { serverUrl, username } = this.settings;
+  private config(): Config | undefined {
     const password = this.app.secretStorage.getSecret(SECRET_ID);
-    if (!serverUrl || !username || !password) return undefined;
-    const key = `${serverUrl}|${username}|${password}`;
-    if (this.engine && this.engineKey === key) return this.engine;
-    this.cache?.close();
-    this.cache = await CacheStore.open(`obsidian-caldav-${(this.app as App & { appId: string }).appId}`, `${serverUrl}|${username}`);
-    this.engine = new SyncEngine(new CalDavClient(serverUrl, basicAuth(username, password), requestUrlTransport()), this.cache);
-    this.engineKey = key;
-    return this.engine;
+    const { serverUrl, username } = this.settings;
+    return serverUrl && username && password ? { serverUrl, username, password } : undefined;
   }
 
   async syncNow(notify: boolean): Promise<SyncReport | undefined> {
-    const engine = await this.ensureEngine();
-    if (!engine) {
+    const r = await this.sessions.sync(this.config());
+    if (!r) {
       if (notify) new Notice("CalDAV：請先在設定頁填 Server URL、使用者名稱與密碼");
       return undefined;
     }
-    const r = await engine.syncAll();
+    this.lastReport = r;
     if (r.errors.length) console.warn("[obsidian-caldav] 同步錯誤", r.errors);
     if (notify) {
       new Notice(r.errors.length
@@ -66,29 +61,40 @@ export default class CalDavPlugin extends Plugin {
   }
 
   async statusLines(): Promise<string[]> {
-    if (!this.cache || !this.engine) return ["尚未設定或尚未同步"];
-    const r = this.engine.lastReport;
-    const cols = await this.cache.getCollections();
-    const lines = [
-      `上次同步：${r ? new Date(r.finishedAt).toLocaleString() : "—"}`,
-      `物件數：${await this.cache.count()}`,
-      `清單：${cols.map((c) => c.displayName).join("、") || "—"}`,
-    ];
-    if (r?.errors.length) lines.push(`最近錯誤：${r.errors.map((e) => `${e.collection ?? ""} ${e.message}`.trim()).join("；")}`);
-    return lines;
+    try {
+      const session = await this.sessions.get(this.config());
+      if (!session) return ["尚未設定"];
+      const r = this.lastReport;
+      const cols = await session.cache.getCollections();
+      const lines = [
+        `上次同步：${r ? new Date(r.finishedAt).toLocaleString() : "—"}`,
+        `物件數：${await session.cache.count()}`,
+        `清單：${cols.map((c) => c.displayName).join("、") || "—"}`,
+      ];
+      if (r?.errors.length) lines.push(`最近錯誤：${r.errors.map((e) => `${e.collection ?? ""} ${e.message}`.trim()).join("；")}`);
+      if (r?.skippedItems.length) lines.push(`略過（無法解析）：${r.skippedItems.map((s) => `${s.href}（${s.reason}）`).join("；")}`);
+      return lines;
+    } catch (e) {
+      return [`無法讀取本機快取：${e instanceof Error ? e.message : String(e)}`];
+    }
   }
 
   async lookup(id: string): Promise<string> {
-    if (!this.cache) await this.ensureEngine();
-    if (!this.cache) return "尚未設定";
-    const objs = await this.cache.findByShortId(id);
-    const cols = new Map((await this.cache.getCollections()).map((c) => [c.href, c.displayName]));
-    if (objs.length) {
-      return objs.map((o) => [o.kind, o.summary || "（無標題）", o.status ?? "", o.due ? `到期 ${o.due.value}` : o.start ? `開始 ${o.start.value}` : "", o.rrule ? `重複 ${o.rrule}` : "", `清單 ${cols.get(o.collection) ?? o.collection}`].filter(Boolean).join("｜")).join("\n");
+    try {
+      const session = await this.sessions.get(this.config());
+      if (!session) return "尚未設定";
+      const { cache } = session;
+      const objs = await cache.findByShortId(id);
+      const cols = new Map((await cache.getCollections()).map((c) => [c.href, c.displayName]));
+      if (objs.length) {
+        return objs.map((o) => [o.kind, o.summary || "（無標題）", o.status ?? "", o.due ? `到期 ${o.due.value}` : o.start ? `開始 ${o.start.value}` : "", o.rrule ? `重複 ${o.rrule}` : "", `清單 ${cols.get(o.collection) ?? o.collection}`].filter(Boolean).join("｜")).join("\n");
+      }
+      const ts = await cache.findTombstonesByShortId(id);
+      if (ts.length) return ts.map((t) => `已刪除：${t.summary || "（無標題）"}`).join("\n");
+      return "查無此物";
+    } catch (e) {
+      return `無法讀取本機快取：${e instanceof Error ? e.message : String(e)}`;
     }
-    const ts = await this.cache.findTombstonesByShortId(id);
-    if (ts.length) return ts.map((t) => `已刪除：${t.summary || "（無標題）"}`).join("\n");
-    return "查無此物";
   }
 }
 
