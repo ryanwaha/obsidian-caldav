@@ -43,6 +43,13 @@ export class CalDavClient {
     return el?.getElementsByTagNameNS("DAV:", "href")[0]?.textContent?.trim() || undefined;
   }
 
+  async get(href: string): Promise<{ status: number; ics: string; etag?: string }> {
+    const res = await this.transport({ method: "GET", url: this.base + href, headers: { Authorization: this.auth } });
+    if (res.status === 401) throw new HttpError(401, "帳號或密碼錯誤");
+    const etag = getHeader(res.headers, "etag");
+    return etag === undefined ? { status: res.status, ics: res.text } : { status: res.status, ics: res.text, etag };
+  }
+
   /** 回傳狀態碼由呼叫端判斷（201/204 成功、412 前置條件不符）；只有 401 會丟例外。 */
   async put(href: string, ics: string, cond: { ifNoneMatch: true } | { ifMatch: string }): Promise<{ status: number; etag?: string }> {
     const headers: Record<string, string> = { Authorization: this.auth, "Content-Type": "text/calendar; charset=utf-8" };

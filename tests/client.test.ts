@@ -89,3 +89,17 @@ describe("CalDavClient.put", () => {
     await expect(new CalDavClient(SERVER, "Basic x", transport).put("/ryanw/test/n.ics", "X", { ifNoneMatch: true })).rejects.toBeInstanceOf(HttpError);
   });
 });
+
+describe("CalDavClient.get", () => {
+  test("回傳 ics 與 etag", async () => {
+    const { transport, calls } = fakeTransport({ "GET /ryanw/test/a.ics": { status: 200, headers: { ETag: '"g"' }, text: "BEGIN:VCALENDAR" } });
+    expect(await new CalDavClient(SERVER, "Basic x", transport).get("/ryanw/test/a.ics")).toEqual({ status: 200, ics: "BEGIN:VCALENDAR", etag: '"g"' });
+    expect(calls[0].headers?.Authorization).toBe("Basic x");
+  });
+  test("404 照實回傳；401 丟例外", async () => {
+    const { transport } = fakeTransport({ "GET /a.ics": { status: 404, headers: {}, text: "" }, "GET /b.ics": { status: 401, headers: {}, text: "" } });
+    const c = new CalDavClient(SERVER, "Basic x", transport);
+    expect((await c.get("/a.ics")).status).toBe(404);
+    await expect(c.get("/b.ics")).rejects.toBeInstanceOf(HttpError);
+  });
+});
