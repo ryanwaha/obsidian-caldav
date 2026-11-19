@@ -135,3 +135,16 @@ describe("pending queue (db v2)", () => {
     expect((await s.allPending()).map((p) => p.uid)).toEqual(["p1"]);
   });
 });
+
+test("I2：舊版連線未關閉導致升級被擋時，open 會失敗而不是永遠等待", async () => {
+  const name = fresh();
+  const v1 = await new Promise<IDBDatabase>((resolve, reject) => {
+    const r = indexedDB.open(name, 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore("meta"); };
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+  // v1 連線沒有 onversionchange，也不關閉
+  await expect(CacheStore.open(name, "fp")).rejects.toThrow(/其他/);
+  v1.close();
+});

@@ -1,4 +1,4 @@
-import { type App, type Editor, MarkdownView, Modal, Notice, Plugin, Setting } from "obsidian";
+import { type App, type Editor, type EditorPosition, MarkdownView, type MarkdownFileInfo, type TFile, Modal, Notice, Plugin, Setting } from "obsidian";
 import { buildTodo } from "./ical/build";
 import { parseResource } from "./ical/parse";
 import { shortId } from "./shortid";
@@ -36,7 +36,7 @@ export default class CalDavPlugin extends Plugin {
     this.addSettingTab(new CalDavSettingTab(this.app, this));
     this.addCommand({ id: "sync-now", name: "立即同步", callback: () => void this.syncNow(true) });
     this.addCommand({ id: "insert-ref", name: "插入任務／事件參照", editorCallback: (editor) => this.insertRef(editor) });
-    this.addCommand({ id: "new-task", name: "新建任務並插入參照", editorCallback: (editor) => this.newTask(editor) });
+    this.addCommand({ id: "new-task", name: "新建任務並插入參照", editorCallback: (editor, ctx) => this.newTask(editor, ctx) });
     this.addCommand({ id: "lookup-short-id", name: "以短 ID 查詢", callback: () => new LookupModal(this.app, this).open() });
     this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v)));
     this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v)));
@@ -138,20 +138,34 @@ export default class CalDavPlugin extends Plugin {
   private insertRef(editor: Editor): void {
     const objs = this.index.allObjects();
     if (!objs.length) { new Notice("CalDAV：快取是空的，請先設定並同步"); return; }
+    const at = editor.getCursor("to"); // 插在選取之後，不覆蓋使用者選取的文字
     new PickModal(this.app, objs, (h) => this.collectionNames.get(h) ?? h, (o) => {
-      editor.replaceSelection(`[](cal:${o.shortId})`);
+      editor.replaceRange(`[](cal:${o.shortId})`, at);
       if (this.index.get(o.shortId).objs.length > 1) new Notice("注意：這個短 ID 對到多筆物件，參照會顯示為有歧義");
     }).open();
   }
 
-  private newTask(editor: Editor): void {
+  private newTask(editor: Editor, ctx: MarkdownView | MarkdownFileInfo): void {
+    const file = ctx.file;
+    const at = editor.getCursor("to");
     const cols = this.todoCollections();
     const def = this.defaultCollectionHref();
     if (!this.config() || !def) { new Notice("CalDAV：請先設定並同步一次，才能選擇清單"); return; }
-    new NewTaskModal(this.app, cols, def, (v) => void this.createTask(editor, v)).open();
+    new NewTaskModal(this.app, cols, def, (v) => void this.createTask(file, at, v)).open();
   }
 
-  private async createTask(editor: Editor, v: NewTaskInput): Promise<void> {
+  /** 只有原筆記仍在作用中才插入；否則把參照交給使用者自己貼，避免插進別篇筆記。 */
+  private insertAt(file: TFile | null, at: EditorPosition, text: string): void {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (file && view?.file === file) {
+      view.editor.replaceRange(text, at);
+    } else {
+      void navigator.clipboard?.writeText(text).catch(() => {});
+      new Notice(`CalDAV：任務已建立，但原筆記已不在畫面上。參照已複製，請手動貼上：${text}`, 10_000);
+    }
+  }
+
+  private async createTask(file: TFile | null, at: EditorPosition, v: NewTaskInput): Promise<void> {
     try {
       const session = await this.sessions.get(this.config());
       if (!session) { new Notice("CalDAV：尚未設定"); return; }
@@ -164,8 +178,8 @@ export default class CalDavPlugin extends Plugin {
         uid, shortId: sid, fingerprint: session.cache.fingerprint, collection: v.collection, href, ics,
         summary: v.summary, due: "skip" in parsed ? undefined : parsed.due, createdAt: Date.now(), attempts: 0, state: "queued",
       });
+      this.insertAt(file, at, `[](cal:${sid})`); // 入佇列後立刻插入，再更新索引
       await this.reloadIndex();
-      editor.replaceSelection(`[](cal:${sid})`);
       void this.syncNow(false, "新建");
     } catch (e) {
       new Notice(`CalDAV：無法建立任務：${e instanceof Error ? e.message : String(e)}`);

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { CacheStore } from "../src/cache/db";
 import { CalDavClient } from "../src/caldav/client";
 import type { HttpRequest } from "../src/caldav/http";
+import { parseResource } from "../src/ical/parse";
 import { shortId } from "../src/shortid";
 import { SyncEngine } from "../src/sync/engine";
 import { fakeTransport, xml, type Route } from "./fakeTransport";
@@ -202,6 +203,40 @@ describe("flush pending creates", () => {
     expect(await t.cache.allPending()).toEqual([]);
   });
 
+  test("I1：412 後清單同步失敗，物件仍在快取（chip 不會變查無此物）", async () => {
+    const t = await setupWithPut({ status: 412, headers: {}, text: "" }, { status: 500, headers: {}, text: "" });
+    await t.cache.enqueue(P("n1"));
+    await t.engine.syncAll();
+    expect(await t.cache.allPending()).toEqual([]);
+    expect((await t.cache.findByShortId(await shortId("n1")))[0]).toMatchObject({ summary: "新 n1" });
+  });
+
+  test("I1：412 時不覆蓋快取裡已有的版本", async () => {
+    const t = await setupWithPut({ status: 412, headers: {}, text: "" }, { status: 500, headers: {}, text: "" });
+    const existing = await parseResource(todo("n1", "伺服器上的新標題"), { href: `${TEST}n1.ics`, etag: '"srv"', collection: TEST });
+    await t.cache.upsertObjects([existing as any]);
+    await t.cache.enqueue(P("n1"));
+    await t.engine.syncAll();
+    expect((await t.cache.findByShortId(await shortId("n1")))[0]).toMatchObject({ summary: "伺服器上的新標題", etag: '"srv"' });
+  });
+
+  test("M4：200 也算成功", async () => {
+    const t = await setupWithPut({ status: 200, headers: {}, text: "" });
+    await t.cache.enqueue(P("n1"));
+    const r = await t.engine.syncAll();
+    expect(r.sent).toBe(1);
+    expect(r.errors).toEqual([]);
+  });
+
+  test.each([408, 423, 429])("M4：%i 是暫時性錯誤，保留 queued 並停止本輪", async (code) => {
+    const t = await setupWithPut({ status: code, headers: {}, text: "" });
+    await t.cache.enqueue(P("n1", { createdAt: 1 }));
+    await t.cache.enqueue(P("n2", { createdAt: 2 }));
+    await t.engine.syncAll();
+    expect(t.calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+    expect((await t.cache.allPending()).every((p) => p.state === "queued")).toBe(true);
+  });
+
   test("403：標為失敗並保留", async () => {
     const t = await setupWithPut({ status: 403, headers: {}, text: "" });
     await t.cache.enqueue(P("n1"));
@@ -234,11 +269,11 @@ describe("flush pending creates", () => {
     expect(r.pendingFailed).toBe(1);
   });
 
-  async function setupWithPut(put: Route) {
+  async function setupWithPut(put: Route, testReport: Route = xml(syncMs("t1", []))) {
     const { transport, calls } = fakeTransport({
       "PROPFIND /": xml(radicale("propfind-principal.xml")),
       "PROPFIND /ryanw/": (req: HttpRequest) => (req.body!.includes("calendar-home-set") ? xml(radicale("propfind-home-set.xml")) : xml(radicale("propfind-collections.xml"))),
-      [`REPORT ${TEST}`]: xml(syncMs("t1", [])),
+      [`REPORT ${TEST}`]: testReport,
       [`REPORT ${TASKS}`]: xml(syncMs("k1", [])),
       [`PUT ${TEST}n1.ics`]: put,
       [`PUT ${TEST}n2.ics`]: put,

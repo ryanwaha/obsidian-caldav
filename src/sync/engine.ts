@@ -73,20 +73,27 @@ export class SyncEngine {
         report.errors.push(toError(e, p.collection));
         return;
       }
-      if (res.status === 201 || res.status === 204 || res.status === 412) {
-        // 412：UID 是本機隨機產生的，只可能是上次已送出但沒收到回應
-        if (res.status !== 412) {
-          const parsed = await parseResource(p.ics, { href: p.href, etag: res.etag ?? "", collection: p.collection });
+      const temporary = res.status === 408 || res.status === 423 || res.status === 429 || res.status >= 500;
+      if (res.status >= 200 && res.status < 300) {
+        const parsed = await parseResource(p.ics, { href: p.href, etag: res.etag ?? "", collection: p.collection });
+        if (!("skip" in parsed)) await this.cache.upsertObjects([parsed]);
+        await this.cache.removePending(p.uid);
+        report.sent++;
+      } else if (res.status === 412) {
+        // UID 是本機隨機產生的，412 只可能是上次已送出但沒收到回應。
+        // 快取裡還沒有就先放本機版本（etag 空白，之後同步會更新）；已有的可能是伺服器較新的版本，不覆蓋。
+        if (!(await this.cache.getObject(p.href))) {
+          const parsed = await parseResource(p.ics, { href: p.href, etag: "", collection: p.collection });
           if (!("skip" in parsed)) await this.cache.upsertObjects([parsed]);
         }
         await this.cache.removePending(p.uid);
         report.sent++;
-      } else if (res.status >= 400 && res.status < 500) {
-        await this.cache.updatePending({ ...p, state: "failed", attempts: p.attempts + 1, lastError: `HTTP ${res.status}` });
-      } else {
+      } else if (temporary) {
         await this.cache.updatePending({ ...p, attempts: p.attempts + 1, lastError: `HTTP ${res.status}` });
-        report.errors.push({ collection: p.collection, message: `送出新任務失敗（HTTP ${res.status}）` });
+        report.errors.push({ collection: p.collection, message: `送出新任務暫時失敗（HTTP ${res.status}）` });
         return;
+      } else {
+        await this.cache.updatePending({ ...p, state: "failed", attempts: p.attempts + 1, lastError: `HTTP ${res.status}` });
       }
     }
   }

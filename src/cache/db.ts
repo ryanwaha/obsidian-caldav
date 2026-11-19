@@ -37,7 +37,21 @@ export class CacheStore {
         db.createObjectStore("pending", { keyPath: "uid" }).createIndex("shortId", "shortId");
       }
     };
-    const db = await req(open);
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      let settled = false;
+      open.onsuccess = () => {
+        if (settled) { open.result.close(); return; } // 已經放棄：晚到的連線直接關掉
+        settled = true;
+        resolve(open.result);
+      };
+      open.onerror = () => { if (!settled) { settled = true; reject(open.error); } };
+      // 舊版連線還開著時升級會被擋住；不放棄的話整個同步會永遠卡住
+      open.onblocked = () => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("本機資料庫升級被其他開著的連線擋住，請關閉其他 Obsidian 視窗或重新啟動 Obsidian"));
+      };
+    });
     db.onversionchange = () => db.close();
     const store = new CacheStore(db, fingerprint);
     const tx = store.db.transaction([...CACHE_STORES], "readwrite");
@@ -106,6 +120,9 @@ export class CacheStore {
 
   findByShortId(id: string): Promise<CalObject[]> { return this.readAll("objects", "shortId", id); }
   findTombstonesByShortId(id: string): Promise<Tombstone[]> { return this.readAll("tombstones", "shortId", id); }
+  async getObject(href: string): Promise<CalObject | undefined> {
+    return (await req(this.db.transaction("objects").objectStore("objects").get(href))) as CalObject | undefined;
+  }
   allObjects(): Promise<CalObject[]> { return this.readAll("objects"); }
   allTombstones(): Promise<Tombstone[]> { return this.readAll("tombstones"); }
   private async writePending(fn: (os: IDBObjectStore) => void): Promise<void> {
