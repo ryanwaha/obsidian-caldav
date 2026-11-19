@@ -23,7 +23,8 @@ export function diffPatch(obj: CalObject, form: EditForm): Patch {
   if (obj.kind === "VTODO" && form.done !== wasDone) patch.done = form.done;
   const cur = dateInputOf(obj.kind === "VTODO" ? obj.due : obj.start);
   const next = normalizeDue(form.date, form.time, new Date());
-  if ((next.date ?? "") !== cur.date || (next.time ?? "") !== cur.time) {
+  const clearingRecurring = !next.date && !!obj.rrule; // 重複任務不能清除日期（§4.3／I2b）
+  if (!clearingRecurring && ((next.date ?? "") !== cur.date || (next.time ?? "") !== cur.time)) {
     patch.date = next.date ? (next.time ? { date: next.date, time: next.time } : { date: next.date }) : null;
   }
   return patch;

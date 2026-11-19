@@ -19,8 +19,16 @@ function description(o: CalObject): string | undefined {
   } catch { return undefined; }
 }
 
+const STATUS_TEXT: Record<string, string> = { "": "未完成", "NEEDS-ACTION": "未完成", "IN-PROCESS": "進行中", COMPLETED: "已完成", CANCELLED: "已取消" };
+/** Managed.date 形如 "date-time|Asia/Taipei|20261124T150000"。 */
+function dateText(d: string | undefined): string {
+  if (!d) return "（無日期）";
+  const [type, tzid, v] = d.split("|");
+  const day = `${v.slice(0, 4)}/${+v.slice(4, 6)}/${+v.slice(6, 8)}`;
+  return type === "date" ? day : `${day} ${v.slice(9, 11)}:${v.slice(11, 13)}${tzid && tzid !== "Asia/Taipei" ? `（${tzid}）` : v.endsWith("Z") ? "（UTC）" : ""}`;
+}
 const managedText = (m: Managed, field: string) =>
-  field === "summary" ? m.summary : field === "done" ? (m.done ? "已完成" : "未完成") : (m.date ?? "（無日期）");
+  field === "summary" ? m.summary : field === "done" ? (STATUS_TEXT[m.status] ?? m.status) : dateText(m.date);
 
 export interface DetailOptions {
   collectionName: (href: string) => string;

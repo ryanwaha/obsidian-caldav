@@ -104,58 +104,85 @@ export class SyncEngine {
     }
   }
 
-  private async succeed(p: PendingUpdate, ics: string, etag: string | undefined, report: SyncReport): Promise<void> {
-    const parsed = await parseResource(ics, { href: p.href, etag: etag ?? "", collection: p.collection });
+  /** 公開給「用伺服器的」：取得伺服器上最新版本寫入快取。 */
+  async refreshObject(href: string, collection: string): Promise<void> {
+    const cur = await this.client.get(href);
+    if (cur.status === 404) { await this.cache.removeObjects([href], this.now()); return; }
+    if (cur.status !== 200) throw new Error(`取得伺服器版本失敗（HTTP ${cur.status}）`);
+    const parsed = await parseResource(cur.ics, { href, etag: cur.etag ?? "", collection });
     if (!("skip" in parsed)) await this.cache.upsertObjects([parsed]);
-    await this.cache.removePending(p.uid);
-    report.sent++;
   }
 
   /**
    * 送出一筆修改。回傳 false 表示遇到暫時性錯誤，應停止本輪 flush。
    * 412：重新取得伺服器版本；修改涉及的欄位伺服器都沒動過（或剛好和我的一樣）就合併重送，否則標為衝突。
+   * 送出途中若使用者又修改了（rev 改變），不刪除也不覆寫那筆，而是以剛送出的版本為新基準。
    */
   private async flushUpdate(p: PendingUpdate, report: SyncReport): Promise<boolean> {
     const temporary = (s: number) => s === 408 || s === 423 || s === 429 || s >= 500;
-    const fail = async (lastError: string) => this.cache.updatePending({ ...p, state: "failed", attempts: p.attempts + 1, lastError });
+    const latest = async () => (await this.cache.getPending(p.uid)) as PendingUpdate | undefined;
+    const unchanged = (cur: PendingUpdate | undefined): cur is PendingUpdate => !!cur && (cur.rev ?? 0) === (p.rev ?? 0);
+    const succeed = async (ics: string, etag: string | undefined) => {
+      const cur = await latest();
+      if (cur && (cur.rev ?? 0) !== (p.rev ?? 0)) {
+        // 送出途中又被修改：保留新的修改，基準改成剛送出的版本；快取裡的樂觀版本已包含新修改，不覆寫
+        await this.cache.updatePending({ ...cur, baseIcs: ics, baseEtag: etag ?? "", state: "queued", conflict: undefined, lastError: undefined });
+      } else {
+        const parsed = await parseResource(ics, { href: p.href, etag: etag ?? "", collection: p.collection });
+        if (!("skip" in parsed)) await this.cache.upsertObjects([parsed]);
+        await this.cache.removePending(p.uid);
+      }
+      report.sent++;
+      return true;
+    };
+    const mark = async (fields: Partial<PendingUpdate>) => {
+      const cur = await latest();
+      if (unchanged(cur)) await this.cache.updatePending({ ...cur, ...fields });
+    };
+    const fail = async (lastError: string) => { await mark({ state: "failed", attempts: p.attempts + 1, lastError }); return true; };
     const retryLater = async (msg: string, e?: unknown) => {
-      await this.cache.updatePending({ ...p, attempts: p.attempts + 1, lastError: msg });
+      const cur = await latest();
+      if (cur) await this.cache.updatePending({ ...cur, attempts: cur.attempts + 1, lastError: msg });
       report.errors.push(e ? toError(e, p.collection) : { collection: p.collection, message: msg });
       return false;
     };
+    const patched = (ics: string): string | Error => {
+      try { return applyPatch(ics, p.patch, new Date(this.now())); } catch (e) { return e instanceof Error ? e : new Error(String(e)); }
+    };
+    const FIELD = { summary: "summary", done: "status", date: "date" } as const;
     try {
-      let baseIcs = p.baseIcs, etag = p.baseEtag;
-      let res: { status: number; etag?: string };
-      if (etag) {
-        const ics = applyPatch(baseIcs, p.patch, new Date(this.now()));
-        res = await this.client.put(p.href, ics, { ifMatch: etag });
-        if (res.status >= 200 && res.status < 300) { await this.succeed(p, ics, res.etag, report); return true; }
-        if (res.status === 404) { await fail("伺服器上已刪除"); return true; }
+      let baseIcs = p.baseIcs;
+      if (p.baseEtag) {
+        const ics = patched(baseIcs);
+        if (ics instanceof Error) return fail(ics.message);
+        const res = await this.client.put(p.href, ics, { ifMatch: p.baseEtag });
+        if (res.status >= 200 && res.status < 300) return succeed(ics, res.etag);
+        if (res.status === 404) return fail("伺服器上已刪除");
         if (temporary(res.status)) return retryLater(`修改暫時失敗（HTTP ${res.status}）`);
-        if (res.status !== 412) { await fail(`HTTP ${res.status}`); return true; }
+        if (res.status !== 412) return fail(`HTTP ${res.status}`);
       }
       // 412，或沒有 etag：取得伺服器目前的版本
       const cur = await this.client.get(p.href);
-      if (cur.status === 404) { await fail("伺服器上已刪除"); return true; }
+      if (cur.status === 404) return fail("伺服器上已刪除");
       if (temporary(cur.status)) return retryLater(`取得伺服器版本暫時失敗（HTTP ${cur.status}）`);
-      if (cur.status !== 200 || !cur.etag) { await fail(`取得伺服器版本失敗（HTTP ${cur.status}）`); return true; }
-      if (!etag) baseIcs = cur.ics; // 沒有 etag 時，以伺服器版本為基準
-      const base = managedValues(baseIcs), server = managedValues(cur.ics);
-      const mine = managedValues(applyPatch(baseIcs, p.patch, new Date(this.now())));
-      const fields = (Object.keys(p.patch) as (keyof typeof p.patch)[]).map((k) => (k === "date" ? "date" : k) as "summary" | "done" | "date");
-      const conflicting = fields.filter((f) => server[f] !== base[f] && server[f] !== mine[f]);
-      if (conflicting.length) {
-        await this.cache.updatePending({ ...p, state: "conflict", lastError: "伺服器上同一欄位也被修改", conflict: { serverIcs: cur.ics, serverEtag: cur.etag, base, mine, server } });
+      if (cur.status !== 200 || !cur.etag) return fail(`取得伺服器版本失敗（HTTP ${cur.status}）`);
+      if (!p.baseEtag) baseIcs = cur.ics; // 沒有 etag 時，以伺服器版本為基準
+      const merged = patched(cur.ics); // 伺服器版本若已變成重複項目，這裡會被 §4.3 擋下
+      if (merged instanceof Error) return fail(merged.message);
+      const mineIcs = patched(baseIcs);
+      if (mineIcs instanceof Error) return fail(mineIcs.message);
+      const base = managedValues(baseIcs), server = managedValues(cur.ics), mine = managedValues(mineIcs);
+      const fields = (Object.keys(p.patch) as (keyof typeof FIELD)[]).map((k) => FIELD[k]);
+      if (fields.some((f) => server[f] !== base[f] && server[f] !== mine[f])) {
+        await mark({ state: "conflict", lastError: "伺服器上同一欄位也被修改", conflict: { serverIcs: cur.ics, serverEtag: cur.etag, base, mine, server } });
         return true;
       }
-      if (fields.every((f) => server[f] === mine[f])) { await this.succeed(p, cur.ics, cur.etag, report); return true; }
-      const merged = applyPatch(cur.ics, p.patch, new Date(this.now()));
-      res = await this.client.put(p.href, merged, { ifMatch: cur.etag });
-      if (res.status >= 200 && res.status < 300) { await this.succeed(p, merged, res.etag, report); return true; }
-      if (res.status === 404) { await fail("伺服器上已刪除"); return true; }
+      if (fields.every((f) => server[f] === mine[f])) return succeed(cur.ics, cur.etag);
+      const res = await this.client.put(p.href, merged, { ifMatch: cur.etag });
+      if (res.status >= 200 && res.status < 300) return succeed(merged, res.etag);
+      if (res.status === 404) return fail("伺服器上已刪除");
       if (res.status === 412 || temporary(res.status)) return retryLater(`修改暫時失敗（HTTP ${res.status}）`);
-      await fail(`HTTP ${res.status}`);
-      return true;
+      return fail(`HTTP ${res.status}`);
     } catch (e) {
       return retryLater(toError(e).message, e);
     }

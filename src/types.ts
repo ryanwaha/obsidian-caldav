@@ -62,7 +62,8 @@ export interface PendingCreate {
 
 /** 插件管理的欄位（§4.3）。date 為 null 表示清除日期。 */
 export interface Patch { summary?: string; done?: boolean; date?: { date: string; time?: string } | null }
-export interface Managed { summary: string; done: boolean; date?: string }
+/** 衝突比對用：STATUS 原文、日期含形式與時區（"date-time|Asia/Taipei|20261124T150000"）。 */
+export interface Managed { summary: string; status: string; date?: string }
 
 /** 待送的修改：每個物件最多一筆（key 為 "upd:" + href），後來的修改合併進 patch。 */
 export interface PendingUpdate {
@@ -72,6 +73,8 @@ export interface PendingUpdate {
   /** 修改前的伺服器版本：412 時用來判斷伺服器改了哪些欄位 */
   baseIcs: string; baseEtag: string;
   patch: Patch; summary: string;
+  /** 每次使用者修改加 1；送出途中若被修改，引擎就不會刪掉這筆 */
+  rev?: number;
   createdAt: number; attempts: number;
   state: "queued" | "failed" | "conflict"; lastError?: string;
   conflict?: { serverIcs: string; serverEtag: string; base: Managed; mine: Managed; server: Managed };

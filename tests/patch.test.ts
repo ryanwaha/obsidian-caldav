@@ -89,8 +89,8 @@ describe("applyPatch", () => {
 
 describe("managedValues", () => {
   test("讀出標題、完成、日期", () => {
-    expect(managedValues(ios("10-after-phone/test/8ADF576B-CED5-4071-BE32-9CB2BBA5F4B1.ics"))).toEqual({ summary: "reminder test:modified", done: false, date: "20261119T150000" });
-    expect(managedValues(vcal("BEGIN:VEVENT", "UID:e", "SUMMARY:會", "DTSTART;VALUE=DATE:20261120", "END:VEVENT"))).toEqual({ summary: "會", done: false, date: "20261120" });
+    expect(managedValues(ios("10-after-phone/test/8ADF576B-CED5-4071-BE32-9CB2BBA5F4B1.ics"))).toEqual({ summary: "reminder test:modified", status: "NEEDS-ACTION", date: "date-time|Asia/Taipei|20261119T150000" });
+    expect(managedValues(vcal("BEGIN:VEVENT", "UID:e", "SUMMARY:會", "DTSTART;VALUE=DATE:20261120", "END:VEVENT"))).toEqual({ summary: "會", status: "", date: "date||20261120" });
   });
 });
 
@@ -105,5 +105,42 @@ describe("提醒：形式改變時", () => {
   });
   test("全天 → 全天：平移天數", () => {
     expect(unfold(applyPatch(allDay, { date: { date: "2026-11-26" } }, now))).toContain("TRIGGER;VALUE=DATE-TIME:20261126T010000Z");
+  });
+});
+
+describe("review fixes", () => {
+  const MANAGED = /^(SUMMARY|STATUS|COMPLETED|PERCENT-COMPLETE|DUE|DTSTART|DTEND|DTSTAMP|LAST-MODIFIED|SEQUENCE|TRIGGER)[;:]/;
+  test.each([
+    "10-after-phone/tasks/CD14C2C1-9D2C-4F19-B96C-71F394462131.ics",
+    "00-baseline/85483CE1-1395-4CD0-BF87-7B32BA498B32.ics",
+    "10-after-phone/test/t1-unknown-fields.ics",
+  ])("C1：修改兩次後，未管理的行逐位元組相同（%s）", (f) => {
+    const orig = ios(f);
+    const twice = applyPatch(applyPatch(orig, { summary: "一" }, now), { done: true }, now);
+    const keep = (s: string) => unfold(s).split("\r\n").filter((l) => l && !MANAGED.test(l));
+    expect(keep(twice).filter((l) => !/^(COMPLETED|PERCENT-COMPLETE)/.test(l))).toEqual(keep(orig));
+  });
+
+  test("I1：重複 VTODO 不能改完成狀態；重複 VEVENT、帶 override 不能改", () => {
+    const rt = vcal("BEGIN:VTODO", "UID:r", "RRULE:FREQ=WEEKLY", "DUE;VALUE=DATE:20261124", "END:VTODO");
+    expect(() => applyPatch(rt, { done: true }, now)).toThrow(/重複/);
+    expect(() => applyPatch(rt, { summary: "可以" }, now)).not.toThrow();
+    const re = vcal("BEGIN:VEVENT", "UID:e", "DTSTART;VALUE=DATE:20261120", "RRULE:FREQ=WEEKLY", "END:VEVENT");
+    expect(() => applyPatch(re, { summary: "x" }, now)).toThrow(/重複/);
+    const ov = vcal("BEGIN:VEVENT", "UID:o", "DTSTART;VALUE=DATE:20261120", "END:VEVENT", "BEGIN:VEVENT", "UID:o", "RECURRENCE-ID;VALUE=DATE:20261127", "DTSTART;VALUE=DATE:20261128", "END:VEVENT");
+    expect(() => applyPatch(ov, { summary: "x" }, now)).toThrow(/重複/);
+  });
+
+  test("I2b：重複 VTODO 不能清除日期", () => {
+    const rt = vcal("BEGIN:VTODO", "UID:r", "RRULE:FREQ=WEEKLY", "DTSTART;VALUE=DATE:20261124", "DUE;VALUE=DATE:20261124", "END:VTODO");
+    expect(() => applyPatch(rt, { date: null }, now)).toThrow(/重複/);
+  });
+
+  test("I2：managedValues 保留 STATUS 原文與日期的時區、形式", () => {
+    const a = managedValues(vcal("BEGIN:VTODO", "UID:a", "STATUS:CANCELLED", "DUE;TZID=America/New_York:20261124T150000", "END:VTODO"));
+    const b = managedValues(vcal("BEGIN:VTODO", "UID:a", "STATUS:COMPLETED", "DUE;TZID=Asia/Taipei:20261124T150000", "END:VTODO"));
+    expect(a.status).toBe("CANCELLED");
+    expect(b.status).toBe("COMPLETED");
+    expect(a.date).not.toBe(b.date);
   });
 });

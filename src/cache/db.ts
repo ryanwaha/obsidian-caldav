@@ -134,6 +134,9 @@ export class CacheStore {
   updatePending(p: PendingOp): Promise<void> { return this.writePending((os) => os.put(p)); }
   removePending(key: string): Promise<void> { return this.writePending((os) => os.delete(key)); }
   allPending(): Promise<PendingOp[]> { return this.readAll("pending"); }
+  async getPending(key: string): Promise<PendingOp | undefined> {
+    return (await req(this.db.transaction("pending").objectStore("pending").get(key))) as PendingOp | undefined;
+  }
 
   count(): Promise<number> { return req(this.db.transaction("objects").objectStore("objects").count()); }
   close(): void { this.db.close(); }

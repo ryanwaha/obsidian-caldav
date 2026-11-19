@@ -42,10 +42,20 @@ export class SessionManager {
     return this.current.session;
   }
 
+  private rerun?: Config;
+
+  /** 進行中又被要求同步時，結束後用最新設定再跑一輪（例如送出途中使用者又修改了）。 */
   sync(cfg: Config | undefined): Promise<SyncReport | undefined> {
-    if (!this.inflight) {
-      this.inflight = this.runSync(cfg).finally(() => { this.inflight = undefined; });
+    if (this.inflight) {
+      if (cfg) this.rerun = cfg;
+      return this.inflight;
     }
+    this.inflight = this.runSync(cfg).finally(() => {
+      this.inflight = undefined;
+      const again = this.rerun;
+      this.rerun = undefined;
+      if (again) void this.sync(again);
+    });
     return this.inflight;
   }
 

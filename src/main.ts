@@ -40,8 +40,8 @@ export default class CalDavPlugin extends Plugin {
     this.addCommand({ id: "insert-ref", name: "插入任務／事件參照", editorCallback: (editor) => this.insertRef(editor) });
     this.addCommand({ id: "new-task", name: "新建任務並插入參照", editorCallback: (editor, ctx) => this.newTask(editor, ctx) });
     this.addCommand({ id: "lookup-short-id", name: "以短 ID 查詢", callback: () => new LookupModal(this.app, this).open() });
-    this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v), (v) => this.toggleDone(v)));
-    this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v), (v) => this.toggleDone(v)));
+    this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v), (v) => void this.toggleDone(v)));
+    this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v), (v) => void this.toggleDone(v)));
     this.register(this.index.onChange(() => this.refreshEditors()));
     // iOS 從其他 App 切回時不一定觸發 visibilitychange，所以多聽幾種「回到前景」的訊號，15 秒內只同步一次
     this.registerDomEvent(document, "visibilitychange", () => { if (document.visibilityState === "visible") this.foregroundSync("visibilitychange"); });
@@ -207,8 +207,13 @@ export default class CalDavPlugin extends Plugin {
     }).open();
   }
 
-  private toggleDone(view: RefView): void {
-    if (view.obj) void this.editObject(view.obj, { done: !view.done });
+  /** 以快取裡最新的狀態為準切換（連點時 view 可能還是舊的）。 */
+  private async toggleDone(view: RefView): Promise<void> {
+    if (!view.obj) return;
+    const session = await this.sessions.get(this.config());
+    const cur = (await session?.cache.getObject(view.obj.href)) ?? view.obj;
+    const done = cur.status === "COMPLETED" || cur.status === "CANCELLED";
+    await this.editObject(cur, { done: !done });
   }
 
   /** 寫入待送修改（每個物件一筆，合併 patch）→ 樂觀更新快取 → 同步。 */
@@ -216,14 +221,18 @@ export default class CalDavPlugin extends Plugin {
     try {
       const session = await this.sessions.get(this.config());
       if (!session) { new Notice("CalDAV：尚未設定"); return; }
+      const cur = (await session.cache.getObject(obj.href)) ?? obj;
+      // 先算出樂觀版本：§4.3 不允許的修改會在這裡丟出例外，不會進佇列
+      const optimisticIcs = applyPatch(cur.ics, patch, new Date());
       const key = `upd:${obj.href}`;
-      const existing = (await session.cache.allPending()).find((p): p is PendingUpdate => isUpdate(p) && p.uid === key);
+      const existing = (await session.cache.getPending(key)) as PendingUpdate | undefined;
       const op: PendingUpdate = existing
-        ? { ...existing, patch: { ...existing.patch, ...patch }, summary: patch.summary ?? existing.summary }
-        : { op: "update", uid: key, objUid: obj.uid, shortId: obj.shortId, fingerprint: session.cache.fingerprint, collection: obj.collection, href: obj.href,
-            baseIcs: obj.ics, baseEtag: obj.etag, patch, summary: patch.summary ?? obj.summary, createdAt: Date.now(), attempts: 0, state: "queued" };
+        // 衝突或失敗中又修改：重設為待送，下次送出時重新比對（舊的衝突快照已不代表這次的修改）
+        ? { ...existing, patch: { ...existing.patch, ...patch }, summary: patch.summary ?? existing.summary, rev: (existing.rev ?? 0) + 1, state: "queued", conflict: undefined, lastError: undefined }
+        : { op: "update", uid: key, objUid: cur.uid, shortId: cur.shortId, fingerprint: session.cache.fingerprint, collection: cur.collection, href: cur.href,
+            baseIcs: cur.ics, baseEtag: cur.etag, patch, summary: patch.summary ?? cur.summary, rev: 1, createdAt: Date.now(), attempts: 0, state: "queued" };
       await session.cache.updatePending(op);
-      const optimistic = await parseResource(applyPatch(obj.ics, patch, new Date()), { href: obj.href, etag: obj.etag, collection: obj.collection });
+      const optimistic = await parseResource(optimisticIcs, { href: cur.href, etag: cur.etag, collection: cur.collection });
       if (!("skip" in optimistic)) await session.cache.upsertObjects([optimistic]);
       await this.reloadIndex();
       void this.syncNow(false, "編輯");
@@ -240,9 +249,13 @@ export default class CalDavPlugin extends Plugin {
       await session.cache.updatePending({ ...p, baseIcs: p.conflict.serverIcs, baseEtag: p.conflict.serverEtag, state: "queued", conflict: undefined, lastError: undefined });
       await this.syncNow(true, "衝突：用我的");
     } else {
+      // 不用衝突當下的快照（之後伺服器可能又變了），直接取最新版本
       await session.cache.removePending(p.uid);
-      const server = await parseResource(p.conflict.serverIcs, { href: p.href, etag: p.conflict.serverEtag, collection: p.collection });
-      if (!("skip" in server)) await session.cache.upsertObjects([server]);
+      try {
+        await session.engine.refreshObject(p.href, p.collection);
+      } catch (e) {
+        new Notice(`CalDAV：已放棄我的修改，但取得伺服器版本失敗；下次同步會更新：${e instanceof Error ? e.message : String(e)}`);
+      }
       await this.reloadIndex();
     }
   }

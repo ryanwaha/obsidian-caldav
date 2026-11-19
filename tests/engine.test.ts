@@ -385,3 +385,99 @@ describe("flush pending updates", () => {
     expect((await t.cache.allPending())[0]).toMatchObject({ state: "queued", attempts: 1 });
   });
 });
+
+describe("M4 review fixes", () => {
+  const base = todo("u1", "原標題", ["DUE;VALUE=DATE:20261124", "STATUS:NEEDS-ACTION"]);
+  const href = `${TEST}u1.ics`;
+  const U = (patch: object, extra: object = {}) => ({
+    op: "update" as const, uid: `upd:${href}`, objUid: "u1", shortId: "uuuuuuuu", fingerprint: "fp", collection: TEST, href,
+    baseIcs: base, baseEtag: '"b"', patch, summary: "原標題", createdAt: 1, attempts: 0, state: "queued" as const, rev: 1, ...extra,
+  });
+  async function make(routes: (cache: CacheStore) => Record<string, Route | Route[]>) {
+    const cache = await CacheStore.open(`fix-${Math.random()}`, "fp");
+    stores.push(cache);
+    const { transport, calls } = fakeTransport({
+      "PROPFIND /": xml(radicale("propfind-principal.xml")),
+      "PROPFIND /ryanw/": (req: HttpRequest) => (req.body!.includes("calendar-home-set") ? xml(radicale("propfind-home-set.xml")) : xml(radicale("propfind-collections.xml"))),
+      [`REPORT ${TEST}`]: { status: 500, headers: {}, text: "" },
+      [`REPORT ${TASKS}`]: xml(syncMs("k1", [])),
+      ...routes(cache),
+    });
+    return { engine: new SyncEngine(new CalDavClient(SERVER, "Basic x", transport), cache), cache, calls };
+  }
+
+  test("C2：送出途中又被修改 → 不刪除，以剛送出的版本為新基準繼續排隊", async () => {
+    const t = await make((cache) => ({
+      [`PUT ${href}`]: async () => {
+        await cache.updatePending(U({ done: true, summary: "新" }, { rev: 2 })); // 使用者在 PUT 途中又勾了完成
+        return { status: 204, headers: { Etag: '"n"' }, text: "" };
+      },
+    }));
+    await t.cache.enqueue(U({ summary: "新" }));
+    await t.engine.syncAll();
+    const [p] = await t.cache.allPending();
+    expect(p).toMatchObject({ state: "queued", rev: 2, baseEtag: '"n"', patch: { done: true, summary: "新" } });
+    expect((p as any).baseIcs).toContain("SUMMARY:新");
+  });
+
+  test("I1：412 後發現伺服器已把物件改成重複 → 標為失敗、不送出", async () => {
+    const server = todo("u1", "原標題", ["DUE;VALUE=DATE:20261124", "STATUS:NEEDS-ACTION", "RRULE:FREQ=WEEKLY"]);
+    const t = await make(() => ({
+      [`PUT ${href}`]: { status: 412, headers: {}, text: "" },
+      [`GET ${href}`]: { status: 200, headers: { Etag: '"s"' }, text: server },
+    }));
+    await t.cache.enqueue(U({ done: true }));
+    await t.engine.syncAll();
+    expect(t.calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+    expect((await t.cache.allPending())[0]).toMatchObject({ state: "failed", lastError: expect.stringMatching(/重複/) });
+  });
+
+  test("I2：伺服器把任務改成 CANCELLED、我勾完成 → 衝突", async () => {
+    const server = todo("u1", "原標題", ["DUE;VALUE=DATE:20261124", "STATUS:CANCELLED"]);
+    const t = await make(() => ({
+      [`PUT ${href}`]: { status: 412, headers: {}, text: "" },
+      [`GET ${href}`]: { status: 200, headers: { Etag: '"s"' }, text: server },
+    }));
+    await t.cache.enqueue(U({ done: true }));
+    await t.engine.syncAll();
+    expect((await t.cache.allPending())[0]).toMatchObject({ state: "conflict" });
+  });
+
+  test("I2：伺服器改了時區、我改日期 → 衝突", async () => {
+    const tzBase = todo("u1", "t", ["DUE;TZID=Asia/Taipei:20261124T150000"]);
+    const server = todo("u1", "t", ["DUE;TZID=America/New_York:20261124T150000"]);
+    const t = await make(() => ({
+      [`PUT ${href}`]: { status: 412, headers: {}, text: "" },
+      [`GET ${href}`]: { status: 200, headers: { Etag: '"s"' }, text: server },
+    }));
+    await t.cache.enqueue(U({ date: { date: "2026-11-25", time: "10:00" } }, { baseIcs: tzBase }));
+    await t.engine.syncAll();
+    expect((await t.cache.allPending())[0]).toMatchObject({ state: "conflict" });
+  });
+
+  test("refreshObject：GET 最新版寫入快取", async () => {
+    const latest = todo("u1", "最新", ["DUE;VALUE=DATE:20261130"]);
+    const t = await make(() => ({ [`GET ${href}`]: { status: 200, headers: { Etag: '"l"' }, text: latest } }));
+    await t.engine.refreshObject(href, TEST);
+    expect(await t.cache.getObject(href)).toMatchObject({ summary: "最新", etag: '"l"' });
+  });
+});
+
+describe("SessionManager rerun", () => {
+  test("同步進行中又被要求：結束後再跑一輪", async () => {
+    const { SessionManager } = await import("../src/session");
+    let runs = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fakeEngine = { syncAll: async () => { runs++; if (runs === 1) await gate; return { errors: [] } as any; } };
+    const m = new SessionManager(async () => ({ engine: fakeEngine as any, cache: { close() {} } as any }));
+    const cfg = { serverUrl: "https://x", username: "u", password: "p" };
+    const p1 = m.sync(cfg);
+    await new Promise((r) => setTimeout(r, 0));
+    const p2 = m.sync(cfg);
+    release();
+    await p1; await p2;
+    await new Promise((r) => setTimeout(r, 10));
+    expect(runs).toBe(2);
+  });
+});

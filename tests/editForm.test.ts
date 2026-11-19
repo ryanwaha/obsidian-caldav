@@ -30,3 +30,8 @@ test("diffPatch：VEVENT 用 DTSTART", () => {
   expect(diffPatch(ev, { summary: "原", done: false, date: "2026-11-20", time: "" })).toEqual({});
   expect(diffPatch(ev, { summary: "原", done: false, date: "2026-11-21", time: "" })).toEqual({ date: { date: "2026-11-21" } });
 });
+
+test("I2b：重複任務清空日期欄 → 不產生清除日期的修改", () => {
+  const r = o({ rrule: "FREQ=WEEKLY", due: { value: "20261124", dateOnly: true } });
+  expect(diffPatch(r, { summary: "原", done: false, date: "", time: "" })).toEqual({});
+});

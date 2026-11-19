@@ -1,28 +1,26 @@
 import ICAL from "ical.js";
-import { TAIPEI_VTIMEZONE, serialize } from "./build";
+import type { Managed, Patch } from "../types";
+import { TAIPEI_VTIMEZONE, foldLine } from "./build";
 import { epochIn, zonesOf } from "./parse";
+
+export type { Managed, Patch };
 
 type Comp = InstanceType<typeof ICAL.Component>;
 type Prop = InstanceType<typeof ICAL.Property>;
 
-import type { Managed, Patch } from "../types";
-export type { Managed, Patch };
-
 const TAIPEI_OFFSET = 8 * 3600_000; // E3：一律 Asia/Taipei
-const pad = (n: number) => String(n).padStart(2, "0");
 
+/** 找出不帶 RECURRENCE-ID 的主元件。 */
 function master(root: Comp): Comp | undefined {
   return [...root.getAllSubcomponents("vtodo"), ...root.getAllSubcomponents("vevent")].find((c) => !c.hasProperty("recurrence-id"));
 }
 
-/** 屬性值的原文（jCal → ICS 格式），例如 "20261124T150000"、"20261124"、"20261124T070000Z"。 */
 function raw(prop: Prop | null): string | undefined {
   if (!prop) return undefined;
   const v = prop.toJSON()[3];
   return typeof v === "string" ? v.replace(/[-:]/g, "") : undefined;
 }
 
-/** 日期屬性的絕對時間（ms）。全天與 floating 視為台北時間（E3）。 */
 function epochOf(prop: Prop, zones: ReturnType<typeof zonesOf>): number | undefined {
   const [, params, type, value] = prop.toJSON() as [string, Record<string, string>, string, string];
   if (typeof value !== "string") return undefined;
@@ -38,131 +36,188 @@ function epochOf(prop: Prop, zones: ReturnType<typeof zonesOf>): number | undefi
   return Date.UTC(y, mo - 1, d, h, mi, s) - TAIPEI_OFFSET;
 }
 
-/** 以 E3 的形式寫入：有時間 → TZID=Asia/Taipei；只有日期 → VALUE=DATE。 */
-function setDate(comp: Comp, name: string, epochOrInput: { date: string; time?: string } | number, dateOnly?: boolean): void {
-  comp.removeAllProperties(name);
-  let y: number, mo: number, d: number, h = 0, mi = 0, isDate: boolean;
-  if (typeof epochOrInput === "number") {
-    const t = new Date(epochOrInput + TAIPEI_OFFSET);
-    [y, mo, d, h, mi] = [t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), t.getUTCHours(), t.getUTCMinutes()];
-    isDate = !!dateOnly;
-  } else {
-    [y, mo, d] = epochOrInput.date.split("-").map(Number);
-    isDate = !epochOrInput.time;
-    if (epochOrInput.time) [h, mi] = epochOrInput.time.split(":").map(Number);
-  }
-  const prop = comp.addPropertyWithValue(name, ICAL.Time.fromData(isDate ? { year: y, month: mo, day: d, isDate: true } : { year: y, month: mo, day: d, hour: h, minute: mi, second: 0, isDate: false }));
-  if (!isDate) prop.setParameter("tzid", "Asia/Taipei");
-}
-
 const inputEpoch = (i: { date: string; time?: string }) => {
   const [y, mo, d] = i.date.split("-").map(Number);
   const [h, mi] = i.time ? i.time.split(":").map(Number) : [0, 0];
   return Date.UTC(y, mo - 1, d, h, mi) - TAIPEI_OFFSET;
 };
 
-/** 絕對時間的提醒：to 為數字時直接設為該時間，否則平移 delta。iOS 的位置提醒（X-APPLE-PROXIMITY）不動。 */
-function shiftAlarms(comp: Comp, delta: number, to?: number): void {
-  for (const alarm of comp.getAllSubcomponents("valarm")) {
-    if (alarm.hasProperty("x-apple-proximity")) continue;
-    const trig = alarm.getFirstProperty("trigger");
-    if (!trig || trig.type !== "date-time") continue;
-    const v = raw(trig)!;
-    const ms = to ?? Date.UTC(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8), +v.slice(9, 11), +v.slice(11, 13), +v.slice(13, 15)) + delta;
-    const t = new Date(ms);
-    trig.setValue(ICAL.Time.fromData({ year: t.getUTCFullYear(), month: t.getUTCMonth() + 1, day: t.getUTCDate(), hour: t.getUTCHours(), minute: t.getUTCMinutes(), second: t.getUTCSeconds(), isDate: false }, ICAL.Timezone.utcTimezone));
+/** 用 ical.js 產生單一屬性的一行（未摺行）。 */
+function propLine(name: string, value: unknown, params: Record<string, string> = {}): string {
+  const p = new ICAL.Property(name);
+  for (const [k, v] of Object.entries(params)) p.setParameter(k, v);
+  p.setValue(value as never);
+  return ICAL.stringify.property(p.toJSON(), ICAL.design.defaultSet, true);
+}
+
+/** E3：有時間 → TZID=Asia/Taipei；只有日期 → VALUE=DATE。 */
+function dateLine(name: string, src: { date: string; time?: string } | number, dateOnly?: boolean): string {
+  let y: number, mo: number, d: number, h = 0, mi = 0, isDate: boolean;
+  if (typeof src === "number") {
+    const t = new Date(src + TAIPEI_OFFSET);
+    [y, mo, d, h, mi] = [t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), t.getUTCHours(), t.getUTCMinutes()];
+    isDate = !!dateOnly;
+  } else {
+    [y, mo, d] = src.date.split("-").map(Number);
+    isDate = !src.time;
+    if (src.time) [h, mi] = src.time.split(":").map(Number);
   }
+  return isDate
+    ? propLine(name, ICAL.Time.fromData({ year: y, month: mo, day: d, isDate: true }))
+    : propLine(name, ICAL.Time.fromData({ year: y, month: mo, day: d, hour: h, minute: mi, second: 0, isDate: false }), { tzid: "Asia/Taipei" });
 }
 
-function ensureTaipei(root: Comp): void {
-  if (root.getAllSubcomponents("vtimezone").some((z) => z.getFirstPropertyValue("tzid") === "Asia/Taipei")) return;
-  root.addSubcomponent(new ICAL.Component(ICAL.parse(TAIPEI_VTIMEZONE)));
+const utcLine = (name: string, ms: number) => {
+  const t = new Date(ms);
+  return propLine(name, ICAL.Time.fromData({ year: t.getUTCFullYear(), month: t.getUTCMonth() + 1, day: t.getUTCDate(), hour: t.getUTCHours(), minute: t.getUTCMinutes(), second: t.getUTCSeconds(), isDate: false }, ICAL.Timezone.utcTimezone));
+};
+
+const nameOf = (line: string) => line.match(/^[A-Za-z0-9-]+/)?.[0].toUpperCase() ?? "";
+
+/** 主元件在展開後各行中的範圍，以及其中巢狀子元件（VALARM 等）的範圍。 */
+function locateMaster(lines: string[]): { start: number; end: number } {
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^BEGIN:(VTODO|VEVENT)$/i);
+    if (!m) continue;
+    let depth = 0, j = i, hasRid = false;
+    for (; j < lines.length; j++) {
+      if (/^BEGIN:/i.test(lines[j])) depth++;
+      else if (/^END:/i.test(lines[j])) { depth--; if (depth === 0) break; }
+      else if (depth === 1 && nameOf(lines[j]) === "RECURRENCE-ID") hasRid = true;
+    }
+    if (!hasRid) return { start: i, end: j };
+    i = j;
+  }
+  throw new Error("沒有可修改的 VTODO／VEVENT");
 }
 
-const utcNow = (now: Date) => ICAL.Time.fromJSDate(now, true);
-
-/** 以原始 ICS 為底，只修補 patch 指定的欄位（§4.4）。 */
+/**
+ * 以原始 ICS 為底，逐行修補 patch 指定的欄位（§4.4）。
+ * 沒動到的行一個字元都不改（ical.js 重新序列化會改寫 iOS 的 X-ADDRESS 等參數）。
+ */
 export function applyPatch(ics: string, patch: Patch, now: Date): string {
   const root = new ICAL.Component(ICAL.parse(ics));
   const comp = master(root);
   if (!comp) throw new Error("沒有可修改的 VTODO／VEVENT");
   const zones = zonesOf(root);
   const isTodo = comp.name === "vtodo";
+  const recurring = comp.hasProperty("rrule");
+  const hasOverrides = [...root.getAllSubcomponents("vtodo"), ...root.getAllSubcomponents("vevent")].some((c) => c.hasProperty("recurrence-id"));
 
-  if (patch.summary !== undefined) {
-    comp.removeAllProperties("summary");
-    comp.addPropertyWithValue("summary", patch.summary);
+  // §4.3 在資料層也擋下（物件可能在修改送出前，被其他客戶端改成重複項目）
+  if (hasOverrides || (!isTodo && recurring)) throw new Error("重複事件請在行事曆 App 修改");
+  if (isTodo && recurring && patch.done !== undefined) throw new Error("重複任務的完成請在提醒事項操作");
+  if (isTodo && recurring && patch.date === null) throw new Error("重複任務不能清除日期");
+
+  const lines = ics.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const { start, end } = locateMaster(lines);
+
+  // 主元件自己這一層的行（不含巢狀子元件），以 index 表示
+  const own: number[] = [];
+  for (let i = start + 1, depth = 0; i < end; i++) {
+    if (/^BEGIN:/i.test(lines[i])) depth++;
+    else if (/^END:/i.test(lines[i])) depth--;
+    else if (depth === 0) own.push(i);
   }
+  const drop = new Set<number>();
+  const add: string[] = [];
+  const remove = (...names: string[]) => { for (const i of own) if (names.includes(nameOf(lines[i]))) drop.add(i); };
+  const replaceLines = new Map<number, string>();
+
+  if (patch.summary !== undefined) { remove("SUMMARY"); add.push(propLine("summary", patch.summary)); }
 
   if (patch.done !== undefined && isTodo) {
-    comp.removeAllProperties("status");
-    comp.removeAllProperties("completed");
-    comp.removeAllProperties("percent-complete");
+    remove("STATUS", "COMPLETED", "PERCENT-COMPLETE");
     if (patch.done) {
-      comp.addPropertyWithValue("status", "COMPLETED");
-      comp.addPropertyWithValue("completed", utcNow(now));
-      comp.addPropertyWithValue("percent-complete", 100);
+      add.push(propLine("status", "COMPLETED"), utcLine("completed", now.getTime()), propLine("percent-complete", 100));
     } else {
-      comp.addPropertyWithValue("status", "NEEDS-ACTION");
+      add.push(propLine("status", "NEEDS-ACTION"));
     }
   }
 
+  let needTaipei = false;
   if (patch.date !== undefined) {
-    const target = isTodo ? "due" : "dtstart";
-    const oldProp = comp.getFirstProperty(target);
+    const target = isTodo ? "DUE" : "DTSTART";
+    const oldProp = comp.getFirstProperty(target.toLowerCase());
+    const startProp = comp.getFirstProperty("dtstart");
     const oldEpoch = oldProp ? epochOf(oldProp, zones) : undefined;
-    const startFollows = isTodo && oldProp && comp.getFirstProperty("dtstart")
-      && raw(comp.getFirstProperty("dtstart")) === raw(oldProp)
-      && comp.getFirstProperty("dtstart")!.getParameter("tzid") === oldProp.getParameter("tzid");
+    const startFollows = isTodo && oldProp && startProp && raw(startProp) === raw(oldProp) && startProp.getParameter("tzid") === oldProp.getParameter("tzid");
     if (patch.date === null) {
-      comp.removeAllProperties(target);
-      if (startFollows) comp.removeAllProperties("dtstart");
+      remove(target);
+      if (startFollows) remove("DTSTART");
     } else {
       const newEpoch = inputEpoch(patch.date);
-      setDate(comp, target, patch.date);
-      if (startFollows) setDate(comp, "dtstart", patch.date);
-      if (patch.date.time) ensureTaipei(root);
+      remove(target);
+      add.push(dateLine(target.toLowerCase(), patch.date));
+      if (startFollows) { remove("DTSTART"); add.push(dateLine("dtstart", patch.date)); }
+      needTaipei = !!patch.date.time;
       if (oldEpoch !== undefined) {
         const delta = newEpoch - oldEpoch;
         const formChanged = (oldProp!.type === "date") !== !patch.date.time;
-        // 形式改變（全天 ↔ 有時間）時平移沒有意義：比照 iOS，有時間提醒在到期時，全天提醒在當天 09:00
-        if (formChanged) shiftAlarms(comp, 0, patch.date.time ? newEpoch : newEpoch + 9 * 3600_000);
-        else shiftAlarms(comp, delta);
-        const end = !isTodo ? comp.getFirstProperty("dtend") : null;
-        if (end) {
-          const endEpoch = epochOf(end, zones);
-          const sameForm = (oldProp!.type === "date") === !patch.date.time;
-          if (endEpoch !== undefined && sameForm) setDate(comp, "dtend", endEpoch + delta, end.type === "date");
-          else setDate(comp, "dtend", newEpoch + (patch.date.time ? 3600_000 : 86_400_000), !patch.date.time);
+        // 形式改變時比照 iOS：有時間提醒在到期時，全天提醒在當天 09:00；否則平移
+        const to = formChanged ? (patch.date.time ? newEpoch : newEpoch + 9 * 3600_000) : undefined;
+        shiftAlarms(lines, start, end, delta, to, replaceLines);
+        const endProp = !isTodo ? comp.getFirstProperty("dtend") : null;
+        if (endProp) {
+          const endEpoch = epochOf(endProp, zones);
+          remove("DTEND");
+          if (endEpoch !== undefined && !formChanged) add.push(dateLine("dtend", endEpoch + delta, endProp.type === "date"));
+          else add.push(dateLine("dtend", newEpoch + (patch.date.time ? 3600_000 : 86_400_000), !patch.date.time));
         }
       }
     }
     if (!isTodo && comp.hasProperty("sequence")) {
-      const seq = Number(comp.getFirstPropertyValue("sequence")) || 0;
-      comp.removeAllProperties("sequence");
-      comp.addPropertyWithValue("sequence", seq + 1);
+      remove("SEQUENCE");
+      add.push(propLine("sequence", (Number(comp.getFirstPropertyValue("sequence")) || 0) + 1));
     }
   }
 
-  for (const name of ["dtstamp", "last-modified"]) {
-    comp.removeAllProperties(name);
-    comp.addPropertyWithValue(name, utcNow(now));
+  remove("DTSTAMP", "LAST-MODIFIED");
+  add.push(utcLine("dtstamp", now.getTime()), utcLine("last-modified", now.getTime()));
+
+  const out: string[] = [];
+  const hasTaipei = root.getAllSubcomponents("vtimezone").some((z) => z.getFirstPropertyValue("tzid") === "Asia/Taipei");
+  for (let i = 0; i < lines.length; i++) {
+    if (i === start && needTaipei && !hasTaipei) out.push(...TAIPEI_VTIMEZONE.split("\r\n"));
+    if (i === end) out.push(...add);
+    if (drop.has(i)) continue;
+    out.push(replaceLines.get(i) ?? lines[i]);
   }
-  return serialize(root);
+  return out.map(foldLine).join("\r\n") + "\r\n";
+}
+
+/** 主元件內 VALARM 的絕對時間 TRIGGER：設為 to 或平移 delta。iOS 位置提醒（X-APPLE-PROXIMITY）不動。 */
+function shiftAlarms(lines: string[], start: number, end: number, delta: number, to: number | undefined, out: Map<number, string>): void {
+  for (let i = start + 1; i < end; i++) {
+    if (!/^BEGIN:VALARM$/i.test(lines[i])) continue;
+    let j = i + 1;
+    while (j < end && !/^END:VALARM$/i.test(lines[j])) j++;
+    const block = lines.slice(i + 1, j);
+    if (!block.some((l) => nameOf(l) === "X-APPLE-PROXIMITY")) {
+      for (let k = i + 1; k < j; k++) {
+        const m = lines[k].match(/^TRIGGER;(?:[^:]*;)?VALUE=DATE-TIME(?:;[^:]*)?:(\d{8}T\d{6})Z$/i);
+        if (!m) continue;
+        const v = m[1];
+        const ms = to ?? Date.UTC(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8), +v.slice(9, 11), +v.slice(11, 13), +v.slice(13, 15)) + delta;
+        out.set(k, utcLine("trigger", ms).replace(/^TRIGGER:/, "TRIGGER;VALUE=DATE-TIME:"));
+      }
+    }
+    i = j;
+  }
 }
 
 /** 衝突比對用：插件管理的欄位目前的值。 */
 export function managedValues(ics: string): Managed {
   const root = new ICAL.Component(ICAL.parse(ics));
   const comp = master(root);
-  if (!comp) return { summary: "", done: false };
+  if (!comp) return { summary: "", status: "" };
   const isTodo = comp.name === "vtodo";
-  const status = String(comp.getFirstPropertyValue("status") ?? "");
   const out: Managed = {
     summary: String(comp.getFirstPropertyValue("summary") ?? ""),
-    done: isTodo && (status === "COMPLETED" || status === "CANCELLED"),
+    status: String(comp.getFirstPropertyValue("status") ?? ""),
   };
-  const date = raw(comp.getFirstProperty(isTodo ? "due" : "dtstart"));
-  if (date) out.date = date;
+  const prop = comp.getFirstProperty(isTodo ? "due" : "dtstart");
+  if (prop) out.date = `${prop.type}|${prop.getParameter("tzid") ?? ""}|${raw(prop)}`;
   return out;
 }
