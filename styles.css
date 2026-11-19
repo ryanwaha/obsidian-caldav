@@ -26,3 +26,5 @@
 .caldav-ref--pending { border-style: dashed; color: var(--text-muted); }
 .caldav-ref--failed { color: var(--text-error); border-color: var(--text-error); }
 .caldav-pick__meta { color: var(--text-muted); }
+/* iOS WebKit：空白的 date/time 欄位寬度為 0，看不到也點不到 */
+.caldav-new-task input[type="date"], .caldav-new-task input[type="time"] { min-width: 9em; min-height: 2em; -webkit-appearance: none; appearance: none; }
