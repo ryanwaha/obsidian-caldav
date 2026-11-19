@@ -1,7 +1,9 @@
 import { type App, MarkdownView, Modal, Notice, Plugin, Setting } from "obsidian";
 import type { EditorView } from "@codemirror/view";
 import { MemoryIndex } from "./render/index";
+import { DetailModal } from "./render/detailModal";
 import { livePreviewExtension, refreshEffect } from "./render/livePreview";
+import { readingModeProcessor } from "./render/readingMode";
 import type { RefView } from "./render/present";
 import { CacheStore } from "./cache/db";
 import { CalDavClient } from "./caldav/client";
@@ -21,6 +23,7 @@ export default class CalDavPlugin extends Plugin {
   private intervalId?: number;
   private lastReport?: SyncReport;
   readonly index = new MemoryIndex();
+  private collectionNames = new Map<string, string>();
 
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -28,6 +31,7 @@ export default class CalDavPlugin extends Plugin {
     this.addCommand({ id: "sync-now", name: "立即同步", callback: () => void this.syncNow(true) });
     this.addCommand({ id: "lookup-short-id", name: "以短 ID 查詢", callback: () => new LookupModal(this.app, this).open() });
     this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v)));
+    this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v)));
     this.register(this.index.onChange(() => this.refreshEditors()));
     this.registerDomEvent(document, "visibilitychange", () => { if (document.visibilityState === "visible") void this.syncNow(false); });
     this.app.workspace.onLayoutReady(async () => {
@@ -75,6 +79,7 @@ export default class CalDavPlugin extends Plugin {
   private async reloadIndex(): Promise<void> {
     try {
       const session = await this.sessions.get(this.config());
+      this.collectionNames = new Map((await session?.cache.getCollections() ?? []).map((c) => [c.href, c.displayName]));
       await this.index.load(session?.cache);
     } catch (e) {
       console.warn("[obsidian-caldav] 無法載入索引", e);
@@ -91,7 +96,7 @@ export default class CalDavPlugin extends Plugin {
   }
 
   openDetail(view: RefView): void {
-    new Notice(`${view.text}${view.when ? `｜${view.when}` : ""}`); // Task 6 換成 DetailModal
+    new DetailModal(this.app, view, (href) => this.collectionNames.get(href) ?? href).open();
   }
 
   async statusLines(): Promise<string[]> {

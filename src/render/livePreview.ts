@@ -54,7 +54,8 @@ export function livePreviewExtension(index: MemoryIndex, onClick: (v: RefView) =
     decorations: DecorationSet;
     constructor(view: EditorView) { this.decorations = build(view, index, onClick); }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.selectionSet || u.viewportChanged || u.transactions.some((t) => t.effects.some((e) => e.is(refreshEffect)))) {
+      const modeChanged = u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false);
+      if (u.docChanged || u.selectionSet || u.viewportChanged || modeChanged || u.transactions.some((t) => t.effects.some((e) => e.is(refreshEffect)))) {
         this.decorations = build(u.view, index, onClick);
       }
     }
