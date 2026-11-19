@@ -8,3 +8,4 @@
 - `ios-27.2/10-after-phone/`：在 iPhone 上執行 T1–T4 後的整個集合（含重複任務完成 11 次產生的副本、跨清單移動後的新 UID）。
 
 位置提醒（`X-APPLE-STRUCTURED-LOCATION`）中的地址與座標已替換為假值，結構與摺行方式保留。
+- `radicale-3.9.2/`：Radicale 對 PROPFIND／sync-collection 的實際 XML 回應（含 token 無效時的 403）。`sync-initial-with-data.xml` 的 calendar-data 已展開摺行，位置資料一樣換成假值。
