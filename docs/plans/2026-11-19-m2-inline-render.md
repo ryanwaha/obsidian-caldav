@@ -230,7 +230,7 @@
   - `.caldav-ref` 有 4 個（第 1、2 行各 1 個，第 3 行 2 個），其中 1 個的 class 是 `caldav-ref--missing`
   - 第 4、5 行沒有被渲染
   - 游標移進第 1 行的參照時，`.caldav-ref` 變成 3 個；移回檔尾後恢復 4 個
-  - 用 curl 把 test2 的 SUMMARY 改成 `test2-改`，再呼叫 `syncNow`：不需要重開筆記，chip 的文字就變成 `test2-改`。驗證完把標題改回 `test2`
+  - 即時更新：先用 curl 在 `test` 建暫存物件 `UID:m2-tmp`（SUMMARY `暫存`），在 `m2.md` 末尾加一行它的參照（短 ID 由 node 算出）並同步。接著用 curl 把 SUMMARY 改成 `暫存-改`，再呼叫 `syncNow`：不需要重開筆記，chip 的文字就變成 `暫存-改`。驗證完 DELETE 這個暫存物件。不要動使用者的 test2
 - [ ] **Step 4:** Commit `feat(render): live preview widgets`
 
 ---
