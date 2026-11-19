@@ -102,3 +102,14 @@ describe("BacklinkIndex", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
+
+test("資料夾改名與刪除：路徑前綴整批處理", () => {
+  const b = new BacklinkIndex();
+  b.setFile("d/a.md", R);
+  b.setFile("d/sub/b.md", R);
+  b.setFile("dx.md", R);
+  b.renameFolder("d", "e");
+  expect(b.notesFor("5cd3cmqd")).toEqual(["dx.md", "e/a.md", "e/sub/b.md"]);
+  b.removeFolder("e");
+  expect(b.notesFor("5cd3cmqd")).toEqual(["dx.md"]);
+});

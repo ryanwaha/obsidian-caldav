@@ -8,6 +8,7 @@ import { describeRrule } from "./recur";
 
 const STATE_TEXT: Record<string, string> = {
   deleted: "已刪除", missing: "查無此物（從未同步到，或已不在任何清單）", ambiguous: "短 ID 對到多筆", pending: "待送（尚未送到伺服器）",
+  moved: "已搬移", "maybe-moved": "可能已搬移：原物件已不在原清單，還有清單沒同步完，暫不判定為刪除",
 };
 
 function description(o: CalObject): string | undefined {
@@ -35,6 +36,11 @@ export interface DetailOptions {
   pendingUpdate?: PendingUpdate;
   onSave?: (obj: CalObject, patch: Patch) => void;
   onResolve?: (p: PendingUpdate, choice: "mine" | "server") => void;
+  /** 反向索引：參照此短 ID 的筆記 */
+  notes?: string[];
+  openNote?: (path: string) => void;
+  /** 使用者明確要求改寫 .md 裡的這個短 ID（P2） */
+  onRewrite?: (from: string, to: string) => void;
 }
 
 export class DetailModal extends Modal {
@@ -63,11 +69,25 @@ export class DetailModal extends Modal {
 
     const dl = contentEl.createEl("dl");
     const row = (k: string, v: string | undefined) => { if (!v) return; dl.createEl("dt", { text: k }); dl.createEl("dd", { text: v }); };
-    if (view.state !== "ok") row("狀態", STATE_TEXT[view.state] ?? view.state);
+    if (view.state !== "ok" && view.state !== "moved") row("狀態", view.ambiguity === "move" ? "搬移後有多筆相符：請選擇要指向哪一筆" : STATE_TEXT[view.state] ?? view.state);
+    if (view.state === "moved" && view.obj) {
+      const box = contentEl.createDiv({ cls: "caldav-detail__note" });
+      box.createSpan({ text: `已從〈${opts.collectionName(view.movedFrom ?? "")}〉搬到〈${opts.collectionName(view.obj.collection)}〉。筆記裡仍是舊的短 ID ${view.id}，在這台裝置靠本機紀錄解析；其他裝置可能看不到。` });
+      if (opts.onRewrite) {
+        const to = view.obj.shortId;
+        new Setting(box).addButton((b) => b.setButtonText(`更新參照（改為 ${to}）`).setCta().onClick(() => { this.close(); opts.onRewrite!(view.id, to); }));
+      }
+    }
     const objs = view.obj ? [view.obj] : view.candidates ?? [];
     const now = new Date();
     for (const o of objs) {
-      if (objs.length > 1) dl.createEl("dt", { text: `候選：${o.summary || "（無標題）"}` });
+      if (objs.length > 1) {
+        dl.createEl("dt", { text: `候選：${o.summary || "（無標題）"}` });
+        if (view.ambiguity === "move" && opts.onRewrite) {
+          const dd = dl.createEl("dd");
+          new Setting(dd).addButton((b) => b.setButtonText("改指向這一筆").onClick(() => { this.close(); opts.onRewrite!(view.id, o.shortId); }));
+        }
+      }
       row("類型", o.kind === "VTODO" ? "任務" : "事件");
       row("狀態", o.status);
       row("開始", o.start && formatDate(o.start, now));
@@ -80,7 +100,17 @@ export class DetailModal extends Modal {
     }
     row("短 ID", view.id);
 
-    if (view.state === "ok" && view.obj && opts.onSave) this.editForm(view.obj);
+    if (opts.notes) {
+      dl.createEl("dt", { text: `參照此項目的筆記（${opts.notes.length}）` });
+      const dd = dl.createEl("dd", { cls: "caldav-detail__notes" });
+      if (!opts.notes.length) dd.setText("—");
+      for (const path of opts.notes) {
+        const a = dd.createEl("a", { text: path.replace(/\.md$/, ""), href: "#" });
+        a.addEventListener("click", (e) => { e.preventDefault(); this.close(); opts.openNote?.(path); });
+      }
+    }
+
+    if ((view.state === "ok" || view.state === "moved") && view.obj && opts.onSave) this.editForm(view.obj);
   }
 
   private editForm(obj: CalObject) {

@@ -38,6 +38,15 @@ export class BacklinkIndex {
     this.emit();
   }
 
+  /** 資料夾改名：底下所有已索引的檔案一起改路徑。 */
+  renameFolder(from: string, to: string): void {
+    for (const path of [...this.byFile.keys()]) if (path.startsWith(`${from}/`)) this.rename(path, to + path.slice(from.length));
+  }
+
+  removeFolder(path: string): void {
+    for (const p of [...this.byFile.keys()]) if (p.startsWith(`${path}/`)) this.removeFile(p);
+  }
+
   notesFor(id: string): string[] { return [...(this.byId.get(id.toLowerCase()) ?? [])].sort(); }
   referencedIds(): Iterable<string> { return this.byId.keys(); }
   clear(): void { this.byFile.clear(); this.byId.clear(); this.emit(); }
