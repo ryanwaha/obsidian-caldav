@@ -1,6 +1,6 @@
 {
   "name": "obsidian-caldav",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "Inline references from Obsidian notes to CalDAV tasks and events",
   "scripts": {
