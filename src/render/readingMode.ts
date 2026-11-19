@@ -1,7 +1,7 @@
 import { MarkdownRenderChild, type MarkdownPostProcessor } from "obsidian";
 import { renderRef } from "./chip";
 import type { MemoryIndex } from "./index";
-import { type RefView, present } from "./present";
+import type { RefView } from "./present";
 import { findRefs } from "./refs";
 
 class RefChild extends MarkdownRenderChild {
@@ -11,8 +11,7 @@ class RefChild extends MarkdownRenderChild {
     this.register(this.index.onChange(() => this.draw()));
   }
   private draw() {
-    const { objs, tombs, pending } = this.index.get(this.id);
-    renderRef(this.containerEl, present(this.id, this.label, objs, tombs, new Date(), pending), this.onClick, this.onToggle);
+    renderRef(this.containerEl, this.index.view(this.id, this.label, new Date()), this.onClick, this.onToggle);
   }
 }
 

@@ -4,7 +4,7 @@ import { type EditorState, type Extension, Prec, RangeSetBuilder, StateEffect } 
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { renderRef } from "./chip";
 import type { MemoryIndex } from "./index";
-import { type RefView, present } from "./present";
+import type { RefView } from "./present";
 import { collectRefs } from "./viewRefs";
 
 export type OnClick = (v: RefView) => void;
@@ -17,8 +17,7 @@ class RefWidget extends WidgetType {
   eq(other: RefWidget): boolean { return other.id === this.id && other.label === this.label && other.version === this.version; }
   toDOM(): HTMLElement {
     const el = document.createElement("span");
-    const { objs, tombs, pending } = this.index.get(this.id);
-    renderRef(el, present(this.id, this.label, objs, tombs, new Date(), pending), this.onClick, this.onToggle);
+    renderRef(el, this.index.view(this.id, this.label, new Date()), this.onClick, this.onToggle);
     return el;
   }
   ignoreEvent(): boolean { return true; }

@@ -5,6 +5,7 @@ const ICON = (v: RefView) =>
   v.state === "pending" ? "⇡"
   : v.state === "deleted" ? "⌫"
   : v.state === "missing" || v.state === "ambiguous" ? "?"
+  : v.state === "maybe-moved" ? "…"
   : v.kind === "VEVENT" ? "◷"
   : v.done ? "☑" : "☐";
 
@@ -13,7 +14,7 @@ const bound = new WeakMap<HTMLElement, Handlers>();
 
 /** 把 el 填成一個參照 chip；可對同一元素重複呼叫。 */
 export function renderRef(el: HTMLElement, view: RefView, onClick: (view: RefView) => void, onToggle?: (view: RefView) => void): void {
-  const canToggle = !!onToggle && view.state === "ok" && !!view.obj && editable(view.obj).done;
+  const canToggle = !!onToggle && (view.state === "ok" || view.state === "moved") && !!view.obj && editable(view.obj).done;
   el.replaceChildren();
   el.className = "caldav-ref";
   el.classList.add(`caldav-ref--${view.state}`);
@@ -21,7 +22,7 @@ export function renderRef(el: HTMLElement, view: RefView, onClick: (view: RefVie
   if (view.overdue) el.classList.add("caldav-ref--overdue");
   if (view.failed) el.classList.add("caldav-ref--failed");
   el.setAttribute("data-cal-id", view.id);
-  el.title = [view.obj?.summary ?? view.text, view.when, view.recur].filter(Boolean).join(" · ");
+  el.title = [view.obj?.summary ?? view.text, view.when, view.recur, view.state === "moved" ? "已搬移：可執行「更新參照」" : ""].filter(Boolean).join(" · ");
 
   const part = (cls: string, text: string) => {
     const s = el.ownerDocument.createElement("span");
@@ -34,6 +35,8 @@ export function renderRef(el: HTMLElement, view: RefView, onClick: (view: RefVie
   part("text", view.text);
   if (view.when) part("when", view.when);
   if (view.recur) part("recur", view.recur);
+  if (view.state === "maybe-moved") part("when", "可能已搬移");
+  if (view.state === "moved") part("moved", "↪");
 
   const old = bound.get(el);
   if (old) { el.removeEventListener("click", old.click); el.removeEventListener("mousedown", old.mousedown); }

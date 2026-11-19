@@ -134,3 +134,31 @@ describe("pending", () => {
     expect(present("x", "", [o], [], now, [p()])).toMatchObject({ state: "ok", text: "已送出" });
   });
 });
+
+describe("present：搬移（M5）", () => {
+  const tomb: Tombstone = { href: "/ryanw/test/old.ics", uid: "old", shortId: "oldoldol", collection: "/ryanw/test/", summary: "舊標題", deletedAt: 1, kind: "VTODO" };
+  const ics = vcal("BEGIN:VTODO", "UID:new", "SUMMARY:交週報", "DUE;VALUE=DATE:20261124", "END:VTODO");
+
+  test("moved：照常顯示新物件，帶 movedFrom", async () => {
+    const o = await obj(ics);
+    const v = present("oldoldol", "", [], [tomb], now, [], { kind: "moved", obj: o, from: tomb });
+    expect(v).toMatchObject({ state: "moved", text: "交週報", kind: "VTODO", done: false, when: "11/24", movedFrom: "/ryanw/test/" });
+    expect(v.obj).toBe(o);
+    expect(present("oldoldol", "週報", [], [tomb], now, [], { kind: "moved", obj: o, from: tomb }).text).toBe("週報");
+  });
+  test("maybe-moved：用標籤或 tombstone 標題", () => {
+    expect(present("oldoldol", "", [], [tomb], now, [], { kind: "maybe", from: tomb })).toMatchObject({ state: "maybe-moved", text: "舊標題" });
+    expect(present("oldoldol", "L", [], [tomb], now, [], { kind: "maybe", from: tomb }).text).toBe("L");
+  });
+  test("搬移歧義：ambiguity = move", async () => {
+    const o = await obj(ics);
+    expect(present("oldoldol", "", [], [tomb], now, [], { kind: "ambiguous", candidates: [o, o], from: tomb })).toMatchObject({ state: "ambiguous", ambiguity: "move", candidates: [o, o] });
+  });
+  test("短 ID 歧義：ambiguity = shortid", async () => {
+    const o = await obj(ics);
+    expect(present("x", "", [o, o], [], now).ambiguity).toBe("shortid");
+  });
+  test("deleted 解析結果 → 已刪除", () => {
+    expect(present("oldoldol", "", [], [tomb], now, [], { kind: "deleted", from: tomb }).state).toBe("deleted");
+  });
+});

@@ -31,3 +31,6 @@
 .caldav-ref__icon--toggle { cursor: pointer; }
 .caldav-ref__icon--toggle:hover { color: var(--interactive-accent); }
 .caldav-detail__conflict { border: 1px solid var(--text-warning); border-radius: var(--radius-s, 4px); padding: 0.5em; margin: 0.5em 0; }
+.caldav-ref__moved { color: var(--text-accent); font-size: 0.85em; }
+.caldav-ref--maybe-moved { color: var(--text-muted); border-style: dashed; }
+.caldav-detail__notes a { display: block; }
