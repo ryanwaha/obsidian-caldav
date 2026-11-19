@@ -6,6 +6,7 @@ import type { HttpRequest } from "../src/caldav/http";
 import { parseResource } from "../src/ical/parse";
 import { shortId } from "../src/shortid";
 import { SyncEngine } from "../src/sync/engine";
+import { MoveResolver } from "../src/sync/moves";
 import { fakeTransport, xml, type Route } from "./fakeTransport";
 import { radicale } from "./fixtures";
 import { syncMs, todo } from "./msBuilder";
@@ -479,5 +480,51 @@ describe("SessionManager rerun", () => {
     await p1; await p2;
     await new Promise((r) => setTimeout(r, 10));
     expect(runs).toBe(2);
+  });
+});
+
+describe("搬移偵測（M5）", () => {
+  const resolveB = async (cache: CacheStore, uid: string) => {
+    const ts = await cache.findTombstonesByShortId(await shortId(uid));
+    return new MoveResolver(await cache.allObjects(), await cache.allTombstones(), await cache.allAliases(), await cache.getCollections()).resolve(ts);
+  };
+
+  test("同一輪：測試 → 任務（iOS：舊集合刪、新集合新 UID）→ 寫入 alias", async () => {
+    const { engine, cache } = await setup({
+      [TEST]: [xml(syncMs("t1", [{ href: `${TEST}a.ics`, ics: todo("a", "交週報") }])), xml(syncMs("t2", [], [`${TEST}a.ics`]))],
+      [TASKS]: [xml(syncMs("k1", [])), xml(syncMs("k2", [{ href: `${TASKS}n.ics`, ics: todo("n", "交週報") }]))],
+    });
+    expect((await engine.syncAll()).aliases).toBe(0);
+    const r = await engine.syncAll();
+    expect(r.aliases).toBe(1);
+    expect(await cache.allAliases()).toMatchObject([{ fromUid: "a", fromShortId: await shortId("a"), toUid: "n", toShortId: await shortId("n") }]);
+    expect(await resolveB(cache, "a")).toMatchObject({ kind: "moved", obj: { uid: "n" } });
+    expect((await engine.syncAll()).aliases).toBe(0); // 不重複寫
+  });
+
+  test("跨兩輪：新集合這輪失敗 → 可能已搬走；下一輪成功 → alias", async () => {
+    const { engine, cache } = await setup({
+      [TEST]: [xml(syncMs("t1", [{ href: `${TEST}a.ics`, ics: todo("a", "交週報") }])), xml(syncMs("t2", [], [`${TEST}a.ics`])), xml(syncMs("t2", []))],
+      [TASKS]: [xml(syncMs("k1", [])), { status: 500, headers: {}, text: "boom" }, xml(syncMs("k2", [{ href: `${TASKS}n.ics`, ics: todo("n", "交週報") }]))],
+    });
+    await engine.syncAll();
+    const r2 = await engine.syncAll();
+    expect(r2.aliases).toBe(0);
+    expect(r2.errors).toHaveLength(1);
+    expect((await resolveB(cache, "a")).kind).toBe("maybe");
+    expect((await engine.syncAll()).aliases).toBe(1);
+    expect((await resolveB(cache, "a")).kind).toBe("moved");
+  });
+
+  test("普通刪除（較晚同步的集合）→ deleted，不是可能已搬走", async () => {
+    const { engine, cache } = await setup({
+      [TEST]: [xml(syncMs("t1", [{ href: `${TEST}a.ics`, ics: todo("a", "交週報") }])), xml(syncMs("t2", [], [`${TEST}a.ics`]))],
+      [TASKS]: xml(syncMs("k1", [])),
+    });
+    await engine.syncAll();
+    const r = await engine.syncAll();
+    const t = (await cache.allTombstones())[0];
+    expect(t.deletedAt).toBe(r.startedAt);
+    expect(await resolveB(cache, "a")).toMatchObject({ kind: "deleted" });
   });
 });

@@ -1,8 +1,8 @@
-import type { CalObject, CollectionInfo, PendingCreate, PendingOp, Tombstone } from "../types";
+import type { Alias, CalObject, CollectionInfo, PendingCreate, PendingOp, Tombstone } from "../types";
 
-const VERSION = 2;
+const VERSION = 3;
 /** 衍生快取：換帳號時清空。pending 不在其中（§4.2）。 */
-const CACHE_STORES = ["meta", "collections", "objects", "tombstones"] as const;
+const CACHE_STORES = ["meta", "collections", "objects", "tombstones", "aliases"] as const;
 type StoreName = (typeof CACHE_STORES)[number] | "pending";
 
 function req<T>(r: IDBRequest<T>): Promise<T> {
@@ -35,6 +35,9 @@ export class CacheStore {
       }
       if (e.oldVersion < 2) {
         db.createObjectStore("pending", { keyPath: "uid" }).createIndex("shortId", "shortId");
+      }
+      if (e.oldVersion < 3) {
+        db.createObjectStore("aliases", { keyPath: "fromUid" }).createIndex("fromShortId", "fromShortId");
       }
     };
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -103,7 +106,7 @@ export class CacheStore {
     for (const href of hrefs) {
       const o = (await req(objs.get(href))) as CalObject | undefined;
       if (!o) continue;
-      const t: Tombstone = { href, uid: o.uid, shortId: o.shortId, collection: o.collection, summary: o.summary, deletedAt: now };
+      const t: Tombstone = { href, uid: o.uid, shortId: o.shortId, collection: o.collection, summary: o.summary, kind: o.kind, deletedAt: now };
       if (o.created !== undefined) t.created = o.created;
       tombs.put(t);
       objs.delete(href);
@@ -136,6 +139,14 @@ export class CacheStore {
   allPending(): Promise<PendingOp[]> { return this.readAll("pending"); }
   async getPending(key: string): Promise<PendingOp | undefined> {
     return (await req(this.db.transaction("pending").objectStore("pending").get(key))) as PendingOp | undefined;
+  }
+
+  allAliases(): Promise<Alias[]> { return this.readAll("aliases"); }
+  async putAliases(as: Alias[]): Promise<void> {
+    if (!as.length) return;
+    const tx = this.db.transaction("aliases", "readwrite");
+    for (const a of as) tx.objectStore("aliases").put(a);
+    await done(tx);
   }
 
   count(): Promise<number> { return req(this.db.transaction("objects").objectStore("objects").count()); }

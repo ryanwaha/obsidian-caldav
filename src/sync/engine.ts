@@ -2,6 +2,7 @@ import type { CacheStore } from "../cache/db";
 import { type CalDavClient, type SyncResult, TokenExpiredError } from "../caldav/client";
 import { parseResource } from "../ical/parse";
 import { applyPatch, managedValues } from "../ical/patch";
+import { detectAliases } from "./moves";
 import { type CalObject, type CollectionInfo, type PendingCreate, type PendingUpdate, type SyncReport, isUpdate } from "../types";
 
 const toError = (e: unknown, collection?: string) => {
@@ -28,7 +29,7 @@ export class SyncEngine {
   }
 
   private async run(): Promise<SyncReport> {
-    const report: SyncReport = { startedAt: this.now(), finishedAt: 0, collections: 0, objects: 0, changed: 0, removed: 0, skipped: 0, skippedItems: [], sent: 0, pendingQueued: 0, pendingFailed: 0, errors: [] };
+    const report: SyncReport = { startedAt: this.now(), finishedAt: 0, collections: 0, objects: 0, changed: 0, removed: 0, skipped: 0, skippedItems: [], sent: 0, aliases: 0, pendingQueued: 0, pendingFailed: 0, errors: [] };
     try {
       const { home } = await this.client.discover();
       await this.flushPending(report);
@@ -37,7 +38,7 @@ export class SyncEngine {
       report.collections = server.length;
 
       for (const gone of [...cached.keys()].filter((h) => !server.some((s) => s.href === h))) {
-        report.removed += await this.cache.removeObjects(await this.cache.hrefsInCollection(gone), this.now());
+        report.removed += await this.cache.removeObjects(await this.cache.hrefsInCollection(gone), report.startedAt);
         await this.cache.deleteCollection(gone);
       }
 
@@ -47,6 +48,14 @@ export class SyncEngine {
         } catch (e) {
           report.errors.push(toError(e, col.href));
         }
+      }
+      try {
+        // 每輪都對所有還沒有 alias 的 tombstone 比對：新集合可能上一輪失敗、或搬移途中才同步到
+        const fresh = detectAliases(await this.cache.allTombstones(), await this.cache.allObjects(), await this.cache.allAliases(), report.startedAt);
+        await this.cache.putAliases(fresh);
+        report.aliases = fresh.length;
+      } catch (e) {
+        report.errors.push(toError(e));
       }
       report.objects = await this.cache.count();
       const all = await this.cache.allPending();
@@ -219,7 +228,8 @@ export class SyncEngine {
 
     await this.cache.upsertObjects(upserts);
     report.changed += upserts.length;
-    report.removed += await this.cache.removeObjects([...toRemove], this.now());
+    // deletedAt 用本輪開始時間：同輪較早同步的集合不會被誤認為「刪除之後還沒同步」
+    report.removed += await this.cache.removeObjects([...toRemove], report.startedAt);
     // 寫入成功後才前進 token；失敗時下次會重新拿到同樣的變更
     await this.cache.putCollection({ ...col, syncToken: result.token, lastSyncAt: this.now() });
   }

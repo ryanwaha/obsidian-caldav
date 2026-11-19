@@ -33,6 +33,15 @@ export interface CollectionInfo {
 export interface Tombstone {
   href: string; uid: string; shortId: string; collection: string;
   summary: string; created?: string; deletedAt: number;
+  /** M5 起寫入；舊資料沒有 */
+  kind?: "VTODO" | "VEVENT";
+}
+
+/** 本機偵測到的搬移（T4）：舊 UID → 新 UID。只在比對唯一時建立，偵測當下就持久化，之後改標題也不失效。 */
+export interface Alias {
+  fromUid: string; fromShortId: string;
+  toUid: string; toShortId: string;
+  detectedAt: number;
 }
 
 export interface SyncReport {
@@ -41,6 +50,8 @@ export interface SyncReport {
   changed: number; removed: number; skipped: number;
   /** 本輪送出的待送新建 */
   sent: number;
+  /** 本輪新增的搬移 alias */
+  aliases: number;
   /** 本輪結束時，仍在佇列（queued）與失敗（failed，含屬於其他帳號）的數量 */
   pendingQueued: number; pendingFailed: number;
   /** 無法解析而略過的資源；已在快取的保留舊版，不視為刪除 */
