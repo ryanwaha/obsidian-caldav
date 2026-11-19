@@ -3,7 +3,7 @@ import ICAL from "ical.js";
 export interface NewTodo { uid: string; summary: string; due?: { date: string; time?: string } }
 
 /** E3：帶時間的值寫 TZID=Asia/Taipei 並附 VTIMEZONE；全天用 VALUE=DATE。 */
-const TAIPEI = ["BEGIN:VTIMEZONE", "TZID:Asia/Taipei", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0800", "TZOFFSETTO:+0800", "TZNAME:CST", "END:STANDARD", "END:VTIMEZONE"].join("\r\n");
+export const TAIPEI_VTIMEZONE = ["BEGIN:VTIMEZONE", "TZID:Asia/Taipei", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0800", "TZOFFSETTO:+0800", "TZNAME:CST", "END:STANDARD", "END:VTIMEZONE"].join("\r\n");
 
 const utcStamp = (d: Date) => ICAL.Time.fromJSDate(d, true);
 
@@ -21,11 +21,17 @@ export function foldLine(line: string): string {
   return out.join("\r\n");
 }
 
+/** ical.js 序列化後以 octets 重新摺行（見 foldLine）。 */
+export function serialize(cal: InstanceType<typeof ICAL.Component>): string {
+  const unfolded = cal.toString().replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+  return unfolded.map(foldLine).join("\r\n") + "\r\n";
+}
+
 export function buildTodo(t: NewTodo, now: Date): string {
   const cal = new ICAL.Component(["vcalendar", [], []]);
   cal.addPropertyWithValue("version", "2.0");
   cal.addPropertyWithValue("prodid", "-//obsidian-caldav//EN");
-  if (t.due?.time) cal.addSubcomponent(new ICAL.Component(ICAL.parse(TAIPEI)));
+  if (t.due?.time) cal.addSubcomponent(new ICAL.Component(ICAL.parse(TAIPEI_VTIMEZONE)));
 
   const todo = new ICAL.Component("vtodo");
   todo.addPropertyWithValue("uid", t.uid);
@@ -46,6 +52,5 @@ export function buildTodo(t: NewTodo, now: Date): string {
     }
   }
   cal.addSubcomponent(todo);
-  const unfolded = cal.toString().replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
-  return unfolded.map(foldLine).join("\r\n") + "\r\n";
+  return serialize(cal);
 }
