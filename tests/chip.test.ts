@@ -62,3 +62,12 @@ test("重複呼叫不會累積子元素、不重複觸發", () => {
   el.click();
   expect(fn).toHaveBeenCalledTimes(1);
 });
+
+test("pending 與 failed", () => {
+  const el = document.createElement("span");
+  renderRef(el, { state: "pending", id: "x", text: "新", kind: "VTODO" }, () => {});
+  expect(el.querySelector(".caldav-ref__icon")!.textContent).toBe("⇡");
+  expect(el.classList.contains("caldav-ref--pending")).toBe(true);
+  renderRef(el, { state: "pending", id: "x", text: "新", kind: "VTODO", failed: true }, () => {});
+  expect(el.classList.contains("caldav-ref--failed")).toBe(true);
+});

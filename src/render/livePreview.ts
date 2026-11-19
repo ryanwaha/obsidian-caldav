@@ -17,8 +17,8 @@ class RefWidget extends WidgetType {
   eq(other: RefWidget): boolean { return other.id === this.id && other.label === this.label && other.version === this.version; }
   toDOM(): HTMLElement {
     const el = document.createElement("span");
-    const { objs, tombs } = this.index.get(this.id);
-    renderRef(el, present(this.id, this.label, objs, tombs, new Date()), this.onClick);
+    const { objs, tombs, pending } = this.index.get(this.id);
+    renderRef(el, present(this.id, this.label, objs, tombs, new Date(), pending), this.onClick);
     return el;
   }
   ignoreEvent(): boolean { return true; }

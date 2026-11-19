@@ -23,3 +23,5 @@
 .caldav-ref--ambiguous { color: var(--text-warning); border-color: var(--text-warning); }
 .caldav-detail dt { color: var(--text-muted); font-size: 0.85em; margin-top: 0.6em; }
 .caldav-detail dd { margin: 0; white-space: pre-wrap; user-select: text; }
+.caldav-ref--pending { border-style: dashed; color: var(--text-muted); }
+.caldav-ref--failed { color: var(--text-error); border-color: var(--text-error); }

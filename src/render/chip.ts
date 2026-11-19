@@ -1,7 +1,8 @@
 import type { RefView } from "./present";
 
 const ICON = (v: RefView) =>
-  v.state === "deleted" ? "⌫"
+  v.state === "pending" ? "⇡"
+  : v.state === "deleted" ? "⌫"
   : v.state === "missing" || v.state === "ambiguous" ? "?"
   : v.kind === "VEVENT" ? "◷"
   : v.done ? "☑" : "☐";
@@ -16,6 +17,7 @@ export function renderRef(el: HTMLElement, view: RefView, onClick: (view: RefVie
   el.classList.add(`caldav-ref--${view.state}`);
   if (view.done) el.classList.add("caldav-ref--done");
   if (view.overdue) el.classList.add("caldav-ref--overdue");
+  if (view.failed) el.classList.add("caldav-ref--failed");
   el.setAttribute("data-cal-id", view.id);
   el.title = [view.obj?.summary ?? view.text, view.when, view.recur].filter(Boolean).join(" · ");
 

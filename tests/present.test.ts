@@ -119,3 +119,18 @@ describe("review fixes", () => {
     expect(present("x", "", [o], [], now).when).toBe("11/24 22:00");
   });
 });
+
+describe("pending", () => {
+  const p = (extra = {}) => ({ uid: "n1", shortId: "x", fingerprint: "fp", collection: "/c/", href: "/c/n1.ics", ics: "", summary: "新任務", due: { value: "20261124T150000", dateOnly: false, tzid: "Asia/Taipei" }, createdAt: 1, attempts: 0, state: "queued" as const, ...extra });
+  test("只有 pending", () => {
+    expect(present("x", "", [], [], now, [p()])).toMatchObject({ state: "pending", text: "新任務", when: "11/24 15:00", kind: "VTODO", done: false });
+    expect(present("x", "標籤", [], [], now, [p()]).text).toBe("標籤");
+  });
+  test("failed", () => {
+    expect(present("x", "", [], [], now, [p({ state: "failed" })])).toMatchObject({ state: "pending", failed: true });
+  });
+  test("objs 與 pending 並存時以 objs 為準", async () => {
+    const o = await obj(vcal("BEGIN:VTODO", "UID:n1", "SUMMARY:已送出", "END:VTODO"));
+    expect(present("x", "", [o], [], now, [p()])).toMatchObject({ state: "ok", text: "已送出" });
+  });
+});

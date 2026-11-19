@@ -11,8 +11,8 @@ class RefChild extends MarkdownRenderChild {
     this.register(this.index.onChange(() => this.draw()));
   }
   private draw() {
-    const { objs, tombs } = this.index.get(this.id);
-    renderRef(this.containerEl, present(this.id, this.label, objs, tombs, new Date()), this.onClick);
+    const { objs, tombs, pending } = this.index.get(this.id);
+    renderRef(this.containerEl, present(this.id, this.label, objs, tombs, new Date(), pending), this.onClick);
   }
 }
 

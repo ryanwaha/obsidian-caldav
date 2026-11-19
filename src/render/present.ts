@@ -1,6 +1,6 @@
 import ICAL from "ical.js";
 import { epochIn, zonesOf } from "../ical/parse";
-import type { CalObject, DateValue, Tombstone } from "../types";
+import type { CalObject, DateValue, PendingCreate, Tombstone } from "../types";
 import { describeRrule } from "./recur";
 
 export type RefState = "ok" | "deleted" | "missing" | "ambiguous" | "pending" | "moved" | "maybe-moved";
@@ -13,6 +13,8 @@ export interface RefView {
   when?: string;
   overdue?: boolean;
   recur?: string;
+  /** pending 且伺服器拒收 */
+  failed?: boolean;
   candidates?: CalObject[];
   obj?: CalObject;
 }
@@ -107,7 +109,14 @@ function computeNext(obj: CalObject, now: Date): DateValue | undefined {
   return undefined;
 }
 
-export function present(id: string, label: string, objs: CalObject[], tombs: Tombstone[], now: Date): RefView {
+export function present(id: string, label: string, objs: CalObject[], tombs: Tombstone[], now: Date, pending: PendingCreate[] = []): RefView {
+  if (objs.length === 0 && pending.length) {
+    const p = pending[0];
+    const view: RefView = { state: "pending", id, text: label || p.summary || "（無標題）", kind: "VTODO", done: false };
+    if (p.due) view.when = formatDate(p.due, now);
+    if (p.state === "failed") view.failed = true;
+    return view;
+  }
   if (objs.length > 1) return { state: "ambiguous", id, text: `有歧義（${objs.length} 筆）`, candidates: objs };
   if (objs.length === 0) {
     if (tombs.length) return { state: "deleted", id, text: label || tombs[0].summary || "（無標題）" };
