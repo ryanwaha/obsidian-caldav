@@ -92,3 +92,30 @@ describe("nextEventOccurrence", () => {
     expect(nextEventOccurrence(o, now)).toBeUndefined();
   });
 });
+
+describe("review fixes", () => {
+  test("I1：2010 年起的每日事件仍算得出下一次", async () => {
+    const o = await obj(vcal("BEGIN:VEVENT", "UID:old", "DTSTART;TZID=Asia/Taipei:20100101T090000", "RRULE:FREQ=DAILY", "END:VEVENT"));
+    expect(nextEventOccurrence(o, now)).toEqual(expect.objectContaining({ value: "20261120T090000" }));
+  });
+  test("I1：快轉保留 INTERVAL 對齊（每 2 天，2010-01-01 起）", async () => {
+    const o = await obj(vcal("BEGIN:VEVENT", "UID:i2", "DTSTART;VALUE=DATE:20100101", "RRULE:FREQ=DAILY;INTERVAL=2", "END:VEVENT"));
+    // 2010-01-01 到 2026-11-19 共 6166 天（偶數）→ 11/19 是發生日
+    expect(nextEventOccurrence(o, now)).toEqual({ value: "20261119", dateOnly: true });
+  });
+  test("I1：每週 BYDAY 自 2015 年起", async () => {
+    const o = await obj(vcal("BEGIN:VEVENT", "UID:w15", "DTSTART;TZID=Asia/Taipei:20150105T100000", "RRULE:FREQ=WEEKLY;BYDAY=MO,TH", "END:VEVENT"));
+    expect(nextEventOccurrence(o, now)?.value).toBe("20261119T100000"); // 11/19 週四 10:00 即 now
+  });
+  test("I1：COUNT 規則不快轉，照算", async () => {
+    const o = await obj(vcal("BEGIN:VEVENT", "UID:c", "DTSTART;VALUE=DATE:20261101", "RRULE:FREQ=DAILY;COUNT=30", "END:VEVENT"));
+    expect(nextEventOccurrence(o, now)).toEqual({ value: "20261119", dateOnly: true });
+    const o2 = await obj(vcal("BEGIN:VEVENT", "UID:c2", "DTSTART;VALUE=DATE:20261101", "RRULE:FREQ=DAILY;COUNT=5", "END:VEVENT"));
+    expect(nextEventOccurrence(o2, now)).toBeUndefined();
+  });
+  test("I4：其他時區的時間換算成本機", async () => {
+    const ny = ["BEGIN:VTIMEZONE", "TZID:America/New_York", "BEGIN:STANDARD", "DTSTART:20071104T020000", "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU", "TZOFFSETFROM:-0400", "TZOFFSETTO:-0500", "TZNAME:EST", "END:STANDARD", "BEGIN:DAYLIGHT", "DTSTART:20070311T020000", "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU", "TZOFFSETFROM:-0500", "TZOFFSETTO:-0400", "TZNAME:EDT", "END:DAYLIGHT", "END:VTIMEZONE"];
+    const o = await obj(vcal(...ny, "BEGIN:VEVENT", "UID:ny", "DTSTART;TZID=America/New_York:20261124T090000", "END:VEVENT"));
+    expect(present("x", "", [o], [], now).when).toBe("11/24 22:00");
+  });
+});

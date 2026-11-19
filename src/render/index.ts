@@ -1,7 +1,7 @@
 import type { CacheStore } from "../cache/db";
 import type { CalObject, Tombstone } from "../types";
 
-const EMPTY = { objs: [] as CalObject[], tombs: [] as Tombstone[] };
+const EMPTY = Object.freeze({ objs: Object.freeze([]) as unknown as CalObject[], tombs: Object.freeze([]) as unknown as Tombstone[] });
 
 /** 快取的記憶體副本：渲染時必須同步取得資料（CM6 decoration 不能等 IndexedDB）。 */
 export class MemoryIndex {
@@ -22,6 +22,11 @@ export class MemoryIndex {
     }
     this.objs = objs;
     this.tombs = tombs;
+    this.touch();
+  }
+
+  /** 資料不變、只要求重繪（例如跨日後「今天／明天」要更新）。 */
+  touch(): void {
     this._version++;
     for (const fn of [...this.listeners]) {
       try { fn(); } catch (e) { console.error("[obsidian-caldav] index listener", e); }

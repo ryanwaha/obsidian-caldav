@@ -19,7 +19,7 @@ describe("parseResource", () => {
     expect(o.shortId).toBe("5cd3cmqd");
     expect(o.summary).toBe("test2");
     expect(o.rrule).toBe("FREQ=WEEKLY;BYDAY=TU,WE,FR");
-    expect(o.due).toEqual({ value: "20261216T150000", dateOnly: false, tzid: "Asia/Taipei" });
+    expect(o.due).toEqual({ value: "20261216T150000", dateOnly: false, tzid: "Asia/Taipei", epoch: Date.UTC(2026, 11, 16, 7, 0, 0) });
     expect(o.status).toBe("NEEDS-ACTION");
     expect(o.created).toBe("20261119T064923Z");
     expect(o.hasOverrides).toBe(false);

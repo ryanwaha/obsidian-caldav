@@ -1,5 +1,9 @@
 /** ICS 原文值：dateOnly 時為 "20261119"，否則為 "20261120T150000"（UTC 結尾帶 Z）。 */
-export interface DateValue { value: string; dateOnly: boolean; tzid?: string }
+export interface DateValue {
+  value: string; dateOnly: boolean; tzid?: string;
+  /** 依 ICS 內附的 VTIMEZONE 算出的絕對時間（ms）；沒有對應 VTIMEZONE 時不提供 */
+  epoch?: number;
+}
 
 export interface CalObject {
   href: string; collection: string; etag: string;

@@ -60,3 +60,17 @@ test("listener 拋例外不影響其他 listener", async () => {
   await idx.load(undefined);
   expect(good).toHaveBeenCalledTimes(1);
 });
+
+test("touch：只遞增 version 並通知，不改資料", async () => {
+  const c = await open();
+  await c.upsertObjects([obj("/a", "aaaaaaaa")]);
+  const idx = new MemoryIndex();
+  await idx.load(c);
+  const fn = vi.fn();
+  idx.onChange(fn);
+  const v = idx.version;
+  idx.touch();
+  expect(idx.version).toBe(v + 1);
+  expect(fn).toHaveBeenCalledTimes(1);
+  expect(idx.get("aaaaaaaa").objs).toHaveLength(1);
+});

@@ -4,15 +4,45 @@ import type { CalObject, DateValue } from "../types";
 
 type Comp = InstanceType<typeof ICAL.Component>;
 
-/** 取 jCal 形式的日期值，轉回 ICS 原文格式（不做時區換算）。 */
-function dateValue(comp: Comp, name: string): DateValue | undefined {
+type Zones = Map<string, InstanceType<typeof ICAL.Timezone>>;
+
+/** 收集 ICS 內附的 VTIMEZONE。 */
+export function zonesOf(root: Comp): Zones {
+  const zones: Zones = new Map();
+  for (const vtz of root.getAllSubcomponents("vtimezone")) {
+    try {
+      const tz = new ICAL.Timezone(vtz);
+      if (tz.tzid) zones.set(tz.tzid, tz);
+    } catch { /* 壞掉的 VTIMEZONE 就不換算 */ }
+  }
+  return zones;
+}
+
+/** 以指定時區解讀 wall time，回傳絕對時間（ms）。 */
+export function epochIn(zones: Zones, tzid: string, y: number, mo: number, d: number, h: number, mi: number, s: number): number | undefined {
+  const tz = zones.get(tzid);
+  if (!tz) return undefined;
+  try {
+    return ICAL.Time.fromData({ year: y, month: mo, day: d, hour: h, minute: mi, second: s, isDate: false }, tz).toUnixTime() * 1000;
+  } catch { return undefined; }
+}
+
+/** 取 jCal 形式的日期值，轉回 ICS 原文格式；有 VTIMEZONE 時另算絕對時間。 */
+function dateValue(comp: Comp, name: string, zones: Zones = new Map()): DateValue | undefined {
   const prop = comp.getFirstProperty(name);
   if (!prop) return undefined;
   const [, params, type, value] = prop.toJSON() as [string, Record<string, string>, string, string];
   if (typeof value !== "string") return undefined;
   const dateOnly = type === "date";
   const out: DateValue = { value: value.replace(/[-:]/g, ""), dateOnly };
-  if (params.tzid) out.tzid = params.tzid;
+  if (params.tzid) {
+    out.tzid = params.tzid;
+    if (!dateOnly) {
+      const v = out.value;
+      const epoch = epochIn(zones, params.tzid, +v.slice(0, 4), +v.slice(4, 6), +v.slice(6, 8), +v.slice(9, 11), +v.slice(11, 13), +v.slice(13, 15));
+      if (epoch !== undefined) out.epoch = epoch;
+    }
+  }
   return out;
 }
 
@@ -37,8 +67,10 @@ export async function parseResource(
 ): Promise<CalObject | { skip: string }> {
   if (!ics.trim()) return { skip: "內容是空的" };
   let comps: Comp[];
+  let zones: Zones;
   try {
     const root = new ICAL.Component(ICAL.parse(ics));
+    zones = zonesOf(root);
     comps = [...root.getAllSubcomponents("vtodo"), ...root.getAllSubcomponents("vevent")];
   } catch (e) {
     return { skip: `ICS 解析失敗：${e instanceof Error ? e.message : String(e)}` };
@@ -59,9 +91,9 @@ export async function parseResource(
   };
   const set = <K extends keyof CalObject>(k: K, v: CalObject[K] | undefined) => { if (v !== undefined) obj[k] = v; };
   set("status", text(main, "status"));
-  set("start", dateValue(main, "dtstart"));
-  set("due", dateValue(main, "due"));
-  set("end", dateValue(main, "dtend"));
+  set("start", dateValue(main, "dtstart", zones));
+  set("due", dateValue(main, "due", zones));
+  set("end", dateValue(main, "dtend", zones));
   set("completed", rawValue(main, "completed"));
   set("created", rawValue(main, "created"));
   set("rrule", rawValue(main, "rrule"));

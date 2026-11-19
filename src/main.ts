@@ -30,13 +30,19 @@ export default class CalDavPlugin extends Plugin {
     this.addSettingTab(new CalDavSettingTab(this.app, this));
     this.addCommand({ id: "sync-now", name: "立即同步", callback: () => void this.syncNow(true) });
     this.addCommand({ id: "lookup-short-id", name: "以短 ID 查詢", callback: () => new LookupModal(this.app, this).open() });
-    this.registerEditorExtension(livePreviewExtension(this.index, (v) => this.openDetail(v)));
+    this.registerEditorExtension(livePreviewExtension(this.index, (v, reveal) => this.openDetail(v, reveal)));
     this.registerMarkdownPostProcessor(readingModeProcessor(this.index, (v) => this.openDetail(v)));
     this.register(this.index.onChange(() => this.refreshEditors()));
     this.registerDomEvent(document, "visibilitychange", () => { if (document.visibilityState === "visible") void this.syncNow(false); });
     this.app.workspace.onLayoutReady(async () => {
       this.resetInterval();
       await this.reloadIndex(); // 先顯示快取（離線也可用），再同步
+      // 跨日時重繪，讓「今天／明天」與逾期標示更新
+      let day = new Date().toDateString();
+      this.registerInterval(window.setInterval(() => {
+        const d = new Date().toDateString();
+        if (d !== day) { day = d; this.index.touch(); }
+      }, 60_000));
       void this.syncNow(false);
     });
   }
@@ -61,7 +67,8 @@ export default class CalDavPlugin extends Plugin {
 
   async syncNow(notify: boolean): Promise<SyncReport | undefined> {
     const r = await this.sessions.sync(this.config());
-    await this.reloadIndex();
+    // 只有資料可能改變時才重載索引；否則每次回前景都會重繪所有 chip
+    if (!r || r.changed > 0 || r.removed > 0 || this.index.version === 0 || r.collections !== this.collectionNames.size) await this.reloadIndex();
     if (!r) {
       if (notify) new Notice("CalDAV：請先在設定頁填 Server URL、使用者名稱與密碼");
       return undefined;
@@ -95,8 +102,8 @@ export default class CalDavPlugin extends Plugin {
     });
   }
 
-  openDetail(view: RefView): void {
-    new DetailModal(this.app, view, (href) => this.collectionNames.get(href) ?? href).open();
+  openDetail(view: RefView, reveal?: () => void): void {
+    new DetailModal(this.app, view, (href) => this.collectionNames.get(href) ?? href, reveal).open();
   }
 
   async statusLines(): Promise<string[]> {
