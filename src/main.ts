@@ -24,6 +24,7 @@ import { SyncEngine } from "./sync/engine";
 import { ProjectionWriter } from "./projection/writer";
 import { UpstreamRunner } from "./projection/upstreamRunner";
 import { ProjectionGuard } from "./projection/guard";
+import { chipExtension, chipPostProcessor, chipRefresh } from "./client/render";
 import { type CalObject, type CollectionInfo, type Patch, type PendingUpdate, type SyncReport, isUpdate } from "./types";
 
 export default class CalDavPlugin extends Plugin {
@@ -94,8 +95,27 @@ export default class CalDavPlugin extends Plugin {
   }
 
   /** M6 裝置模式：不建立 CalDAV session、不同步；只註冊投影檔的 chip、守門與指令（M6-3）。 */
+  private chipVersion = 0;
+  private chipTimer?: number;
   private loadClient(): void {
-    // Task 3–6 在這裡註冊
+    this.registerEditorExtension(chipExtension(this.app, () => this.chipVersion));
+    this.registerMarkdownPostProcessor(chipPostProcessor(this.app));
+    this.registerEvent(this.app.metadataCache.on("changed", (f) => {
+      if (!f.path.startsWith("_caldav/")) return;
+      window.clearTimeout(this.chipTimer);
+      this.chipTimer = window.setTimeout(() => this.refreshChips(), 300);
+    }));
+  }
+
+  private refreshChips(): void {
+    this.chipVersion++;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView)) return;
+      const cm = (view.editor as unknown as { cm?: EditorView }).cm;
+      cm?.dispatch({ effects: chipRefresh.of(null) });
+      if (view.getMode() === "preview") view.previewMode.rerender(true);
+    });
   }
 
   onunload() {

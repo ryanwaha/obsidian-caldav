@@ -34,3 +34,16 @@
 .caldav-ref__moved { color: var(--text-accent); font-size: 0.85em; }
 .caldav-ref--maybe-moved { color: var(--text-muted); border-style: dashed; }
 .caldav-detail__notes a { display: block; }
+
+/* M6 client chip */
+.m6-chip { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 0 6px; border: 1px solid var(--background-modifier-border); border-radius: 10px; font-size: 0.85em; color: var(--text-muted); vertical-align: baseline; }
+.m6-chip__check { margin: 0; min-width: 16px; min-height: 16px; cursor: pointer; }
+.m6-chip__date, .m6-chip__more { cursor: pointer; padding: 0 2px; }
+.m6-chip__date:hover, .m6-chip__more:hover { color: var(--text-normal); }
+.m6-chip--done .m6-chip__date { text-decoration: line-through; }
+.m6-chip__light { font-size: 0.8em; }
+.m6-chip--pending .m6-chip__light { color: var(--text-faint); }
+.m6-chip--rejected .m6-chip__light, .m6-chip--conflict .m6-chip__light { color: var(--text-error); }
+.m6-chip--deleted { border-style: dashed; text-decoration: line-through; }
+.m6-chip__changed { color: var(--text-accent); cursor: help; }
+@media (pointer: coarse) { .m6-chip__check { min-width: 22px; min-height: 22px; } .m6-chip__date, .m6-chip__more { padding: 4px 6px; } }
