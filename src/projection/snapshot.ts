@@ -58,3 +58,11 @@ export function pathFromDocId(id: string): string | undefined {
   const p = id.startsWith("/") ? id.slice(1) : id;
   return p.startsWith("_caldav/") && p.endsWith(".md") ? p : undefined;
 }
+
+/**
+ * 伺服器兜底還原的條件（M6-3 e2e 發現的來回拉鋸）：裝置上的插件會立刻自己改回；伺服器若同時還原，兩邊的還原在 LiveSync 互相衝突。
+ * 所以伺服器等寬限期後，只在「檔案仍不存在，且 LiveSync 資料庫裡這份文件目前也是刪除狀態」時才還原。
+ */
+export function serverRestoreDecision(s: { existsNow: boolean; db: "deleted" | "live" | "unknown" }): boolean {
+  return !s.existsNow && s.db !== "live";
+}

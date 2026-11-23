@@ -4,7 +4,10 @@ import { toLocalParts } from "./dates";
 import { inclusiveEnd } from "./fields";
 import { PROJ_DIR, type ProjFm, WRITABLE_KEYS } from "./types";
 
-export interface ProjFile { path: string; fm: Record<string, unknown> | null; bodyEmpty: boolean }
+export interface ProjFile { path: string; fm: Record<string, unknown> | null; bodyEmpty: boolean; mtime?: number }
+
+/** 伺服器兜底動作的寬限期：裝置上的插件會在幾秒內自己處理，伺服器不要搶（M6-3 e2e）。 */
+export const SERVER_GRACE_MS = 60_000;
 export type ProjAction =
   | { op: "create"; path: string; fm: ProjFm }
   | { op: "update"; path: string; set: Partial<ProjFm>; unset: string[] }
@@ -99,6 +102,7 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
     if (typeof uid === "string" && uid) {
       const first = byUid.get(uid);
       if (!first) { byUid.set(uid, f); continue; }
+      if (f.mtime !== undefined && input.now - f.mtime < SERVER_GRACE_MS) continue; // 太新：可能是裝置正在改回的改名
       const msg = `重複的投影檔（與 ${first.path} 相同 _uid）`;
       if (f.fm?._sync !== "rejected" || f.fm?._sync_msg !== msg) out.push(update(f.path, { _sync: "rejected", _sync_msg: msg }));
       continue;
@@ -174,7 +178,8 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
     else if (p?.state === "failed") want = { ...base, _sync: "rejected", _sync_msg: p.lastError ?? "寫回失敗" };
     const d = diff(cur.fm!, want);
     // 上行被拒絕的標記（值已回滾）保留到使用者下一次被接受的修改，由上行執行器清除；對帳自己的訊息不在此列
-    if (!p && cur.fm!._sync === "rejected" && !RECONCILE_MSGS.has(String(cur.fm!._sync_msg ?? ""))) {
+    // 檔案還沒有 _etag = 剛由裝置新建完成：之前的新建失敗標記應清除（M6-3 review I2）
+    if (!p && cur.fm!._sync === "rejected" && cur.fm!._etag && !RECONCILE_MSGS.has(String(cur.fm!._sync_msg ?? ""))) {
       delete (d.set as Record<string, unknown>)._sync;
       delete (d.set as Record<string, unknown>)._sync_msg;
       d.unset = d.unset.filter((k) => k !== "_sync_msg");

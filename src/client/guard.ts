@@ -2,11 +2,11 @@ import { type App, type EventRef, Modal, Notice, parseYaml, Setting, TFile } fro
 import { splitFrontmatter } from "../projection/frontmatter";
 import { PROJ_DIR } from "../projection/types";
 import { writeFm } from "./actions";
-import { type ConflictMap, conflictWrites, isLocal, isLocalDelete, type StorageAccessManager, systemKeysChanged } from "./guardLogic";
+import { type ConflictMap, conflictWrites, isLocal, isLocalDelete, OwnOps, type StorageAccessManager, systemKeysChanged } from "./guardLogic";
 
 const inDir = (p: string) => p.startsWith(`${PROJ_DIR}/`) && p.endsWith(".md") && p.slice(PROJ_DIR.length + 1).indexOf("/") < 0;
 
-class ConflictModal extends Modal {
+export class ConflictModal extends Modal {
   constructor(app: App, private path: string, private c: ConflictMap) { super(app); }
   onOpen(): void {
     this.titleEl.setText("CalDAV：這個任務有衝突");
@@ -23,6 +23,7 @@ class ConflictModal extends Modal {
 export class ClientGuard {
   private content = new Map<string, string>();
   private fms = new Map<string, Record<string, unknown>>();
+  private own = new OwnOps();
 
   constructor(private app: App) {}
 
@@ -68,17 +69,24 @@ export class ClientGuard {
   }
 
   private async onDelete(f: TFile): Promise<void> {
+    if (this.own.has(f.path)) return;
     if (isLocalDelete(this.sam(), f.path) !== true) return; // LiveSync 帶來的（例如伺服器搬移）不還原
     const text = this.content.get(f.path);
     if (text === undefined) return;
+    this.own.mark(f.path);
     await this.app.vault.create(f.path, text);
     new Notice("CalDAV：投影檔由系統管理，已還原。要刪除任務請用 chip 選單的「刪除任務」", 8000);
   }
 
   private async onRename(f: TFile, old: string): Promise<void> {
     if (!this.sam()) return; // 拿不到 LiveSync 內部 API 時不做本機還原（Global Constraints）；改名事件本身只來自本機（S9）
+    if (this.own.has(old) || this.own.has(f.path)) return;
     if (this.app.vault.getAbstractFileByPath(old)) return;
+    this.own.mark(old); this.own.mark(f.path);
     await this.app.fileManager.renameFile(f, old);
+    // 改名保留 mtime 與 size，LiveSync 會當成自己剛寫的檔而不上傳（S9）；重寫一次讓 mtime 改變（M6-3 review I4）
+    const back = this.app.vault.getAbstractFileByPath(old);
+    if (back instanceof TFile) await this.app.vault.modify(back, await this.app.vault.read(back));
     new Notice("CalDAV：投影檔的名稱與位置由系統管理，已改回", 6000);
   }
 }

@@ -1,7 +1,7 @@
 import { type App, type EventRef, Notice, parseYaml, stringifyYaml, TFile } from "obsidian";
 import type { CacheStore } from "../cache/db";
 import { mergeConflictVersions } from "./conflicts";
-import { chooseRestore, pathFromDocId, RecentPaths } from "./snapshot";
+import { chooseRestore, pathFromDocId, RecentPaths, serverRestoreDecision } from "./snapshot";
 import { newFileContent, splitFrontmatter } from "./frontmatter";
 import { PROJ_DIR } from "./types";
 import type { ProjectionWriter } from "./writer";
@@ -14,6 +14,7 @@ type LiveSyncCore = {
 };
 type DbEntry = { data: string | string[]; _conflicts?: string[] };
 
+import { SERVER_GRACE_MS as GRACE_MS } from "./plan";
 const inDir = (p: string) => p.startsWith(`${PROJ_DIR}/`) && p.endsWith(".md") && p.slice(PROJ_DIR.length + 1).indexOf("/") < 0;
 
 /** 伺服器模式：投影檔被刪除／改名時還原（§8.6 兜底），LiveSync 衝突以程式解決（§8.7，S7）。 */
@@ -46,8 +47,8 @@ export class ProjectionGuard {
     const cache = await this.getCache();
     const snap = await cache?.getProjection(path);
     if (!snap) { console.warn("[obsidian-caldav] 投影檔被刪除，但沒有快照可還原", path); return; }
-    await new Promise((r) => window.setTimeout(r, 1500)); // 遠端改名是刪除＋建立（S9），等建立那一半也到
-    if (this.app.vault.getAbstractFileByPath(path)) return;
+    await new Promise((r) => window.setTimeout(r, GRACE_MS)); // 等裝置自己的改回、以及遠端改名「刪除＋建立」的另一半
+    if (!serverRestoreDecision({ existsNow: !!this.app.vault.getAbstractFileByPath(path), db: await this.dbState(path) })) return;
     const snaps = new Set((await cache!.allProjections()).map((s) => s.path));
     const others: { path: string; uid: string; hasSnap: boolean }[] = [];
     for (const f of this.app.vault.getMarkdownFiles()) {
@@ -72,6 +73,20 @@ export class ProjectionGuard {
     }
     await this.app.vault.create(path, newFileContent(snap.fm, (o) => stringifyYaml(o)) + snap.body);
     console.info("[obsidian-caldav] 已還原被刪除的投影檔", path);
+  }
+
+  /** LiveSync 資料庫中這份文件目前是否為刪除狀態 */
+  private async dbState(path: string): Promise<"deleted" | "live" | "unknown"> {
+    try {
+      const core = (this.app as App & { plugins?: { plugins?: Record<string, { core?: LiveSyncCore }> } }).plugins?.plugins?.["obsidian-livesync"]?.core;
+      const get = core?.localDatabase?.getDBEntry;
+      if (typeof get !== "function") return "unknown";
+      const doc = (await get.call(core!.localDatabase, path, undefined, false, true, true)) as (DbEntry & { deleted?: boolean; _deleted?: boolean }) | false;
+      if (!doc) return "deleted";
+      return doc.deleted || doc._deleted ? "deleted" : "live";
+    } catch {
+      return "unknown";
+    }
   }
 
   private async undoRename(f: TFile, old: string): Promise<void> {

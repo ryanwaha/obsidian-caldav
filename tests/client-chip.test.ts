@@ -42,3 +42,11 @@ test("title-changed", () => {
   expect(chipView(base({ title: "新標題", aliases: ["新標題"] }), "交週報", now).titleChanged).toBe(true);
   expect(chipView(base(), "交週報", now).titleChanged).toBe(false);
 });
+
+test("unsent create: no edits until the server has created it", () => {
+  const v = chipView(base({ _etag: undefined, _hash: undefined }), undefined, now);
+  expect(v.light).toBe("pending");
+  expect(v.checkbox?.enabled).toBe(false);
+  expect(v.editable).toBe(false);
+  expect(chipView(base(), undefined, now).editable).toBe(true);
+});

@@ -47,7 +47,7 @@ export class ProjectionWriter {
     const files = this.app.vault.getMarkdownFiles().filter((f) => f.parent?.path === PROJ_DIR);
     return Promise.all(files.map(async (f) => {
       const { fm, body } = splitFrontmatter(await this.app.vault.read(f));
-      return { path: f.path, fm, bodyEmpty: body.trim() === "" };
+      return { path: f.path, fm, bodyEmpty: body.trim() === "", mtime: f.stat.mtime };
     }));
   }
 
@@ -74,6 +74,11 @@ export class ProjectionWriter {
     for (const f of files) {
       const uid = f.fm?._uid;
       if (typeof uid !== "string" || snaps.has(f.path) || snappedUids.has(uid)) continue;
+      if (f.fm!._etag == null || f.fm!._etag === "") {
+        // 裝置新建、還沒被上行處理（例如伺服器重啟時已在磁碟上、沒有 changed 事件）：交給上行建立，不建快照（M6-3 review C1）
+        if (!objects.some((o) => o.uid === uid) && !(await cache.getPending(uid))) this.onDirty?.(f.path);
+        continue;
+      }
       // 第一次看到、而且這個 uid 在別處沒有快照（例如 M6-1 建立的檔）：以現況為 base
       const s = { path: f.path, uid, fm: applySetUnset(f.fm!, {}, []), body: "", writtenAt: Date.now() };
       await cache.putProjection(s); snaps.set(f.path, s); snappedUids.add(uid);
@@ -109,7 +114,8 @@ export class ProjectionWriter {
     for (const c of (await cache.allPending()).filter((p) => !isUpdate(p) && p.state === "failed")) {
       const f = files.find((x) => x.fm?._uid === c.uid);
       if (!f) continue;
-      try { await this.writeFmOnly(f.path, { _sync: "rejected", _sync_msg: `新建失敗：${c.lastError ?? ""}`.trim() }, []); await cache.removePending(c.uid); }
+      // 一併刪掉快照：使用者修改後可再次觸發新建（M6-3 review I2）
+      try { await this.writeFmOnly(f.path, { _sync: "rejected", _sync_msg: `新建失敗：${c.lastError ?? ""}`.trim() }, []); await cache.removePending(c.uid); await cache.deleteProjection(f.path); }
       catch (e) { console.warn("[obsidian-caldav] 標記新建失敗", f.path, e); }
     }
     // 只在 rejected 已成功投影到檔案之後才刪（review I2）

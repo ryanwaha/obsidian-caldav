@@ -197,3 +197,40 @@ describe("M6-3 Task 1: server-side create from a projection file", () => {
     expect(writes[0].set).toMatchObject({ _sync: "rejected" });
   });
 });
+
+describe("M6-3 review: create path", () => {
+  const newFm = (o: Record<string, unknown> = {}) => ({ title: "裝置新建", status: "needs-action", list: "tasks", _kind: "VTODO", _uid: "new-9", ...o });
+  test("C1 reconcile snapshotted the file first → runner still creates", async () => {
+    const { cache } = await setup();
+    await cache.putProjection({ path: "_caldav/n.md", uid: "new-9", fm: newFm(), body: "", writtenAt: 0 });
+    const { d } = deps(cache);
+    await processUpstream("_caldav/n.md", newFm(), "", d);
+    expect(await cache.getPending("new-9")).toMatchObject({ uid: "new-9", state: "queued" });
+  });
+  test("I1 edit before the object exists updates the queued create instead of 'deleted'", async () => {
+    const { cache } = await setup();
+    const { d, writes } = deps(cache);
+    await processUpstream("_caldav/n.md", newFm(), "", d);
+    await processUpstream("_caldav/n.md", newFm({ title: "改過的新建" }), "", d);
+    expect((await cache.getPending("new-9") as { ics: string }).ics).toContain("SUMMARY:改過的新建");
+    expect(writes.some((w) => w.set._sync === "rejected")).toBe(false);
+  });
+  test("I2 after a failed create, editing list retries", async () => {
+    const { cache } = await setup();
+    const { d } = deps(cache);
+    await processUpstream("_caldav/n.md", newFm({ list: "nope" }), "", d);
+    expect(await cache.getPending("new-9")).toBeUndefined();
+    await processUpstream("_caldav/n.md", newFm({ list: "work", _sync: "rejected", _sync_msg: "找不到清單：nope" }), "", d);
+    expect(await cache.getPending("new-9")).toMatchObject({ collection: W });
+  });
+});
+
+describe("M6-3 e2e: server fallback restore must not race the device's own undo", () => {
+  test("serverRestoreDecision", async () => {
+    const { serverRestoreDecision } = await import("../src/projection/snapshot");
+    expect(serverRestoreDecision({ existsNow: true, db: "deleted" })).toBe(false);
+    expect(serverRestoreDecision({ existsNow: false, db: "live" })).toBe(false); // LiveSync 會把它寫回來（例如裝置已經改回）
+    expect(serverRestoreDecision({ existsNow: false, db: "deleted" })).toBe(true);
+    expect(serverRestoreDecision({ existsNow: false, db: "unknown" })).toBe(true);
+  });
+});

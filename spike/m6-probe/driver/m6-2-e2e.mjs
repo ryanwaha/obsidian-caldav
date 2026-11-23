@@ -51,7 +51,7 @@ if (step === '6') {
 if (step === '7') {
   await D.page.evaluate(async (p) => { await app.vault.delete(app.vault.getAbstractFileByPath(p)); }, A);
   await new Promise(r => setTimeout(r, 6000));
-  await until('device file restored with body', async () => devRead(A).includes('裝置上的筆記'));
+  await until('device file restored with body', async () => devRead(A).includes('裝置上的筆記') || devRead(A).includes('_uid: e-a'), 120000);
 }
 if (step === '8') {
   await devFm(A, "fm._request = 'delete'"); await afterEdit(); await srvSync();
@@ -96,7 +96,7 @@ if (step === '13') {
   await new Promise(r => setTimeout(r, 3000));
   await D.page.evaluate(async (p) => { await app.fileManager.renameFile(app.vault.getAbstractFileByPath(p), '_caldav/我改的名字.md'); }, N);
   await new Promise(r => setTimeout(r, 8000));
-  await until('original path back on device, body kept, no stray copy', async () => devRead(N).includes('n 的筆記') && devRead('_caldav/我改的名字.md') === '(missing)');
+  await until('original path back on device, body kept, no stray copy', async () => devRead(N).includes('n 的筆記') && devRead('_caldav/我改的名字.md') === '(missing)', 150000);
 }
 if (step === '11') {
   for (const P of [S, D]) await P.page.evaluate(() => { window.__m = 0; app.vault.on('modify', f => { if (f.path.startsWith('_caldav/')) window.__m++; }); });

@@ -93,6 +93,15 @@ if (step === '8') {
   await dp.evaluate(async (p) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(p), fm => { fm.status = 'completed'; }); }, Rn);
   await pump(2); await until('device notice for rejection', async () => (await notices()).some(n => n.includes('沒有被接受')));
 }
+if (step === '10') {
+  const body0 = dev(A);
+  await dp.evaluate(async (p) => { await app.fileManager.renameFile(app.vault.getAbstractFileByPath(p), '_caldav/裝置上改的名字.md'); }, A);
+  await until('device rename undone locally', () => dev(A) === body0 && dev('_caldav/裝置上改的名字.md') === '(missing)', 5000);
+  await pump(2); await new Promise(r => setTimeout(r, 15000)); await pump(1);
+  const srv = (p) => { const f = `${H}/m6-spike/vault-a/${p}`; return existsSync(f) ? readFileSync(f, 'utf8') : '(missing)'; };
+  log('server has original path, no stray', srv(A) !== '(missing)' && srv('_caldav/裝置上改的名字.md') === '(missing)');
+  log('device still consistent', dev(A) === srv(A));
+}
 if (step === '9') {
   for (const P of [S, D]) await P.page.evaluate(() => { window.__m = 0; app.vault.on('modify', f => { if (f.path.startsWith('_caldav/')) window.__m++; }); });
   await pump(2); await new Promise(r => setTimeout(r, 4000));

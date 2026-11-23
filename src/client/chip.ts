@@ -7,6 +7,8 @@ export interface ChipView {
   light: "ok" | "pending" | "rejected" | "conflict" | "deleted";
   message?: string;
   titleChanged: boolean;
+  /** 可以從 chip 修改（伺服器還沒建立的新任務、已刪除的任務都不行，review I1） */
+  editable: boolean;
 }
 
 const str = (v: unknown) => (v == null || v === "" ? undefined : String(v));
@@ -42,9 +44,10 @@ export function chipView(fm: Record<string, unknown>, label: string | undefined,
   else if (!str(fm._etag) || (str(fm._hash) && writableHash(fm) !== String(fm._hash))) light = "pending";
 
   const alias = Array.isArray(fm.aliases) && fm.aliases.length ? String(fm.aliases[0]) : title;
-  const view: ChipView = { kind, title, light, titleChanged: label !== undefined && label !== alias };
+  const created = !!str(fm._etag);
+  const view: ChipView = { kind, title, light, titleChanged: label !== undefined && label !== alias, editable: created && !deleted };
   if (date) view.date = date;
   if (message) view.message = message;
-  if (kind === "VTODO") view.checkbox = { checked: fm.status === "completed", enabled: !deleted && !str(fm._rrule) };
+  if (kind === "VTODO") view.checkbox = { checked: fm.status === "completed", enabled: view.editable && !str(fm._rrule) };
   return view;
 }

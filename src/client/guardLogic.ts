@@ -31,3 +31,11 @@ export function isLocalDelete(sam: StorageAccessManager | undefined, path: strin
   if (!sam || typeof sam.isFileProcessing !== "function") return undefined;
   return !sam.isFileProcessing(path);
 }
+
+/** 守門自己造成的改名／建立（10 s 內）不再處理，避免自己觸發自己（M6-3 e2e：改回會再產生一次 rename 事件） */
+export class OwnOps {
+  private m = new Map<string, number>();
+  constructor(private now: () => number = Date.now) {}
+  mark(path: string): void { this.m.set(path, this.now() + 10_000); }
+  has(path: string): boolean { const t = this.m.get(path); return t !== undefined && t > this.now(); }
+}

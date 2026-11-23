@@ -1,5 +1,5 @@
 import type { CacheStore } from "../cache/db";
-import type { PendingUpdate } from "../types";
+import { isUpdate, type PendingUpdate } from "../types";
 import { enqueuePatch, rehome } from "./enqueue";
 import { applySetUnset } from "./snapshot";
 import { dueOf, planUpstream } from "./upstream";
@@ -22,7 +22,7 @@ export interface UpstreamDeps {
 const ok = (st: number) => st >= 200 && st < 300;
 
 /** 裝置新建的投影檔（沒有 `_etag`、快取沒有這個 uid）→ 0.5.0 的 PendingCreate（設計 D9） */
-async function createFrom(path: string, fm: Record<string, unknown>, body: string, d: UpstreamDeps): Promise<void> {
+async function createFrom(path: string, fm: Record<string, unknown>, body: string, d: UpstreamDeps, createdAt?: number): Promise<void> {
   const uid = fm._uid as string;
   const fail = async (msg: string) => { await d.writeFm(path, { _sync: "rejected", _sync_msg: msg }, []); };
   if (fm._kind !== undefined && fm._kind !== "VTODO") return fail("事件請在行事曆 App 建立");
@@ -35,8 +35,9 @@ async function createFrom(path: string, fm: Record<string, unknown>, body: strin
   const now = d.now();
   const ics = buildTodo({ uid, summary: title, due: due.due ?? undefined }, now);
   const href = `${cols[0].href}${uid}.ics`;
-  await d.cache.enqueue({ uid, shortId: await shortId(uid), fingerprint: d.cache.fingerprint, collection: cols[0].href, href, ics, summary: title,
-    createdAt: now.getTime(), attempts: 0, state: "queued" });
+  // 還沒送出前又改了：用最新內容覆寫同一筆（review I1）
+  await d.cache.updatePending({ uid, shortId: await shortId(uid), fingerprint: d.cache.fingerprint, collection: cols[0].href, href, ics, summary: title,
+    createdAt: createdAt ?? now.getTime(), attempts: 0, state: "queued" });
   await d.cache.putProjection({ path, uid, fm: applySetUnset(fm, {}, []), body, writtenAt: Date.now() });
   d.syncSoon();
 }
@@ -49,9 +50,12 @@ export async function processUpstream(path: string, fm: Record<string, unknown>,
   const { cache } = d;
   const snap = await cache.getProjection(path);
   if (typeof fm._uid !== "string") return;
-  if (!snap && (fm._etag == null || fm._etag === "")) {
-    const known = (await cache.allObjects()).some((o) => o.uid === fm._uid) || !!(await cache.getPending(fm._uid as string));
-    if (!known) { await createFrom(path, fm, body, d); return; }
+  if (fm._etag == null || fm._etag === "") {
+    // 裝置新建、伺服器還沒建立（不論是否已有快照：reconcile 可能先替它建了快照，review C1）
+    const inCache = (await cache.allObjects()).some((o) => o.uid === fm._uid);
+    const pc = await cache.getPending(fm._uid);
+    if (!inCache && (!pc || (!isUpdate(pc) && pc.state === "queued"))) { await createFrom(path, fm, body, d, pc && !isUpdate(pc) ? pc.createdAt : undefined); return; }
+    if (!inCache) return; // 新建已送出或失敗中：等伺服器結果
   }
   if (!snap) {
     // 同一個 uid 在別處已有快照 → 這是改名或複製出來的檔，交給 guard／對帳處理，不當成新的 base（review I4）

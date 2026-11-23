@@ -5,6 +5,9 @@ import { type App, editorInfoField, Menu, type MarkdownPostProcessor, TFile } fr
 import { PROJ_DIR } from "../projection/types";
 import { chipView } from "./chip";
 import { ConfirmModal, DateModal, fmOf, TextModal, toggleDone, updateLabels, writeFm } from "./actions";
+import { ConflictModal } from "./guard";
+import type { ConflictMap } from "./guardLogic";
+import { Notice } from "obsidian";
 
 export const chipRefresh = StateEffect.define<null>();
 const LIGHT: Record<string, string> = { ok: "", pending: "等待伺服器處理", rejected: "被拒絕", conflict: "有衝突", deleted: "已刪除" };
@@ -36,7 +39,7 @@ export function buildChip(app: App, target: string, label: string | undefined, s
     const d = el.createSpan({ cls: "m6-chip__date", text: v.date });
     d.addEventListener("click", (e) => {
       stop(e);
-      if (fm._deleted === true || fm._rrule) return;
+      if (!v.editable || fm._rrule) return;
       new DateModal(app, target, v.kind === "VTODO" ? { date: "due", time: "due_time" } : { date: "start", time: "start_time" }).open();
     });
   }
@@ -46,7 +49,10 @@ export function buildChip(app: App, target: string, label: string | undefined, s
   more.addEventListener("click", (e) => {
     stop(e);
     const m = new Menu();
-    if (fm._deleted !== true) {
+    if (v.light === "conflict" && fm._conflict) m.addItem((i) => i.setTitle("處理衝突…").onClick(() => new ConflictModal(app, target, fm._conflict as ConflictMap).open()));
+    if (v.light === "rejected" && v.message) m.addItem((i) => i.setTitle("為什麼被拒絕？").onClick(() => new Notice(`CalDAV：${v.message}`, 10_000)));
+    if (v.light === "pending" && !fm._etag) m.addItem((i) => i.setTitle("等待伺服器建立…").setDisabled(true));
+    if (v.editable) {
       m.addItem((i) => i.setTitle("改標題").onClick(() => new TextModal(app, "改標題", String(fm.title ?? ""), (t) => (t ? writeFm(app, target, { title: t }) : Promise.resolve())).open()));
       if (v.kind === "VTODO" && !fm._rrule) for (const s of ["needs-action", "in-process", "completed", "cancelled"])
         m.addItem((i) => i.setTitle(`狀態：${s}`).setChecked(fm.status === s).onClick(() => void writeFm(app, target, { status: s })));

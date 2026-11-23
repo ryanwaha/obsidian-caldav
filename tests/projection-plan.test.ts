@@ -225,6 +225,21 @@ test("unsent-create-not-deleted", async () => {
   expect(plan(await input([], [file("_caldav/nnnnnnnn.md", fm)], { complete: true }))).toEqual([]);
 });
 
+test("create-rejection-cleared-once-created", async () => {
+  const a = o("a", "aaaaaaaa");
+  const pendingCreateFile = { title: "a", status: undefined, list: "tasks", _kind: "VTODO", _uid: "a", _sync: "rejected", _sync_msg: "新建失敗：HTTP 403" };
+  const r = plan(await input([a], [file("_caldav/aaaaaaaa.md", pendingCreateFile)]));
+  expect((r[0] as Extract<ProjAction, { op: "update" }>).set).toMatchObject({ _sync: "ok" });
+});
+
+test("duplicate-uid: young copies are left alone (the device may still be undoing a rename)", async () => {
+  const a = o("a", "aaaaaaaa");
+  const young = { ...file("_caldav/copy.md", await fmOf(a), false), mtime: 2000 - 5_000 };
+  expect(plan(await input([a], [file("_caldav/aaaaaaaa.md", await fmOf(a)), young], { now: 2000 }))).toEqual([]);
+  const old = { ...young, mtime: 2000 - 61_000 };
+  expect(plan(await input([a], [file("_caldav/aaaaaaaa.md", await fmOf(a)), old], { now: 2000 }))).toHaveLength(1);
+});
+
 test("never-delete", () => {
   for (const r of all) for (const a of r) expect(["create", "update", "rename", "merge-into"]).toContain(a.op);
 });
