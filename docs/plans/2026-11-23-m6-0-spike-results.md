@@ -31,3 +31,9 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
 - 測試 secret 已清空（API 沒有刪除方法，`setSecret(id,'')`）。
 
 **對設計的影響**：伺服器模式的 CalDAV 帳密用 `app.secretStorage`（沿用 0.5.0 的做法），不需要 §11 的退路。
+
+## 基準：探針與 `processFrontMatter`（Task 3）
+
+- 一次 `processFrontMatter` → `modify` 一次，約 2 ms 後 `metadataCache.changed` 一次。
+- **`modify` 觸發當下，`metadataCache` 仍是舊的 frontmatter**（status 還是 needs-action）；`changed` 時才是新值。
+- **對設計的影響**：伺服器的上行處理與客戶端的守門，都以 `metadataCache.on('changed')` 為觸發點讀 frontmatter，不在 `modify` 裡讀 metadataCache。刪除、改名仍用 vault 事件。
