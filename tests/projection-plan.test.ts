@@ -20,7 +20,7 @@ const file = (path: string, fm: Record<string, unknown> | null, bodyEmpty = true
 async function input(objects: CalObject[], files: ProjFile[], extra: Partial<ReconcileInput> = {}): Promise<ReconcileInput> {
   const projected = new Map<string, ProjFm>();
   for (const x of objects) projected.set(x.uid, await projectFields(x));
-  return { objects, projected, tombstones: [], aliases: [], collections: cols, whitelist: [], files, now: 2000, ...extra };
+  return { objects, projected, tombstones: [], aliases: [], collections: cols, whitelist: [], files, now: 2000, complete: true, ...extra };
 }
 const fmOf = async (x: CalObject) => ({ ...(await projectFields(x)) } as Record<string, unknown>);
 const all: ProjAction[][] = [];
@@ -146,6 +146,20 @@ test("rejected-cleared-when-back-in-scope", async () => {
   const a = o("a", "aaaaaaaa");
   const marked = { ...(await fmOf(a)), _sync: "rejected", _sync_msg: "集合不在投影範圍" };
   expect(plan(await input([a], [file("_caldav/aaaaaaaa.md", marked)]))).toEqual([{ op: "update", path: "_caldav/aaaaaaaa.md", set: { _sync: "ok" }, unset: ["_sync_msg"] }]);
+});
+
+test("no-tombstone-incomplete-cache-does-not-mark-deleted", async () => {
+  const a = o("a", "aaaaaaaa");
+  expect(plan(await input([], [file("_caldav/aaaaaaaa.md", await fmOf(a))], { complete: false }))).toEqual([]);
+  expect(plan(await input([], [file("_caldav/aaaaaaaa.md", await fmOf(a))], { complete: true }))).toEqual([{ op: "update", path: "_caldav/aaaaaaaa.md", set: { _deleted: true }, unset: [] }]);
+});
+
+test("moved-to-out-of-scope-collection: no rename, marked out of scope, stable", async () => {
+  const old = o("a", "aaaaaaaa"), moved = o("b", "bbbbbbbb", { collection: W, summary: "a" });
+  const i = await input([moved], [file("_caldav/aaaaaaaa.md", await fmOf(old), false)], { tombstones: [tomb("a", "aaaaaaaa")], whitelist: [T] });
+  expect(plan(i)).toEqual([{ op: "update", path: "_caldav/aaaaaaaa.md", set: { _sync: "rejected", _sync_msg: "集合不在投影範圍" }, unset: [] }]);
+  const marked = { ...(await fmOf(old)), _sync: "rejected", _sync_msg: "集合不在投影範圍" };
+  expect(plan({ ...i, files: [file("_caldav/aaaaaaaa.md", marked, false)] })).toEqual([]);
 });
 
 test("never-delete", () => {

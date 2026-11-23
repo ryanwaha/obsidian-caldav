@@ -43,9 +43,9 @@ export default class CalDavPlugin extends Plugin {
 
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    this.sessions.onReport = () => {
+    this.sessions.onReport = (r) => {
       if (this.settings.mode !== "server") return;
-      void this.projection.reconcile().then((p) => {
+      void this.projection.reconcile(r.errors.length === 0).then((p) => {
         if (p.created || p.updated || p.renamed || p.merged) console.info("[obsidian-caldav] 投影", p);
       });
     };

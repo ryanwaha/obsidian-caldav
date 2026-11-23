@@ -19,6 +19,8 @@ export interface ReconcileInput {
   whitelist: string[];
   files: ProjFile[];
   now: number;
+  /** 上一輪同步無錯誤，且範圍內每個集合都同步過。不完整時，沒有 tombstone 的檔案不標刪除（review I3）。 */
+  complete: boolean;
 }
 
 const MSG_FOREIGN = "不是投影檔";
@@ -82,7 +84,7 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
     if (live.has(uid)) continue;
     const fm = f.fm!;
     const tombs = input.tombstones.filter((t) => t.uid === uid);
-    if (!tombs.length) { if (fm._deleted !== true) out.push(update(f.path, { _deleted: true })); continue; }
+    if (!tombs.length) { if (input.complete && fm._deleted !== true) out.push(update(f.path, { _deleted: true })); continue; }
     const res = resolver.resolve(tombs);
     if (res.kind === "maybe") continue;
     if (res.kind === "deleted") { if (fm._deleted !== true) out.push(update(f.path, { _deleted: true })); continue; }
@@ -93,6 +95,11 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
     }
     const target = res.obj;
     if (moved.has(target.uid)) continue;
+    if (!inScope(target.collection)) {
+      // 搬到白名單外：不改名（改了也不會更新 _uid，每輪都會再解析一次），只標記（review I5）
+      if (fm._sync !== "rejected" || fm._sync_msg !== MSG_OUT_OF_SCOPE) out.push(update(f.path, { _sync: "rejected", _sync_msg: MSG_OUT_OF_SCOPE }));
+      continue;
+    }
     const existing = byUid.get(target.uid);
     if (existing) {
       if (!existing.bodyEmpty) {
@@ -105,7 +112,7 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
     } else {
       used.delete(f.path);
       const to = alloc(target);
-      out.push({ op: "rename", from: f.path, to });
+      if (to !== f.path) out.push({ op: "rename", from: f.path, to });
       moved.set(target.uid, { path: to, fm, bodyEmpty: f.bodyEmpty });
     }
   }

@@ -1,4 +1,5 @@
-import { type App, Notice, parseYaml, TFile } from "obsidian";
+import { type App, Notice, parseYaml, stringifyYaml, TFile } from "obsidian";
+import { newFileContent, splitFrontmatter as split } from "./frontmatter";
 import type { CacheStore } from "../cache/db";
 import { projectFields } from "./fields";
 import { planReconcile, type ProjAction, type ProjFile } from "./plan";
@@ -6,16 +7,8 @@ import { PROJ_DIR, type ProjFm } from "./types";
 
 export interface ReconcileStats { created: number; updated: number; renamed: number; merged: number; skipped: number }
 
-const FM_RE = /^---\r?\n([\s\S]*?)\r?\n?---(?:\r?\n|$)/;
-
 /** 讀檔自己解析 frontmatter，不依賴 metadataCache（剛建立或剛改寫的檔案，metadataCache 可能還沒更新）。 */
-export function splitFrontmatter(text: string): { fm: Record<string, unknown> | null; body: string } {
-  const m = FM_RE.exec(text);
-  if (!m) return { fm: null, body: text };
-  let fm: unknown = null;
-  try { fm = m[1].trim() ? parseYaml(m[1]) : {}; } catch { fm = null; }
-  return { fm: fm && typeof fm === "object" && !Array.isArray(fm) ? (fm as Record<string, unknown>) : null, body: text.slice(m[0].length) };
-}
+const splitFrontmatter = (text: string) => split(text, parseYaml);
 
 /** 伺服器模式：把快取投影到 `_caldav/`（設計 §7.1）。同一時間只跑一輪；進行中又被呼叫，結束後再跑一輪。 */
 export class ProjectionWriter {
@@ -31,7 +24,11 @@ export class ProjectionWriter {
     for (const k of ["due_time", "start_time", "end_time", "list", "status"]) m.setType(k, "text");
   }
 
-  reconcile(): Promise<ReconcileStats> {
+  private lastSyncOk = false;
+
+  /** @param syncOk 觸發這次對帳的同步沒有錯誤 */
+  reconcile(syncOk = false): Promise<ReconcileStats> {
+    this.lastSyncOk = syncOk;
     if (this.running) { this.again = true; return this.running; }
     this.running = this.loop().finally(() => { this.running = undefined; });
     return this.running;
@@ -61,10 +58,13 @@ export class ProjectionWriter {
     const objects = await cache.allObjects();
     const projected = new Map<string, ProjFm>();
     for (const o of objects) if (!projected.has(o.uid)) projected.set(o.uid, await projectFields(o));
+    const collections = await cache.getCollections();
+    const wl = this.whitelist();
+    const complete = this.lastSyncOk && collections.length > 0 && collections.every((c) => (wl.length && !wl.includes(c.href)) || c.lastSyncAt !== undefined);
     const actions = planReconcile({
       objects, projected,
-      tombstones: await cache.allTombstones(), aliases: await cache.allAliases(), collections: await cache.getCollections(),
-      whitelist: this.whitelist(), files: await this.readFiles(), now: Date.now(),
+      tombstones: await cache.allTombstones(), aliases: await cache.allAliases(), collections,
+      whitelist: wl, files: await this.readFiles(), now: Date.now(), complete,
     });
 
     const canRename = (vault as typeof vault & { getConfig(k: string): unknown }).getConfig("alwaysUpdateLinks") === true;
@@ -93,8 +93,7 @@ export class ProjectionWriter {
     const fmApi = this.app.fileManager;
     switch (a.op) {
       case "create": {
-        const f = await this.app.vault.create(a.path, "");
-        await fmApi.processFrontMatter(f, (fm) => { Object.assign(fm, a.fm); });
+        await this.app.vault.create(a.path, newFileContent(a.fm, (o) => stringifyYaml(o)));
         stats.created++;
         return;
       }
