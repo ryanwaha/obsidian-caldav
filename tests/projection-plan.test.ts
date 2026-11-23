@@ -195,7 +195,8 @@ test("pending-failed-projects-rejected", async () => {
 
 test("conflict-cleared-after-resolution", async () => {
   const a = o("a", "aaaaaaaa");
-  const r = plan(await input([a], [file("_caldav/aaaaaaaa.md", { ...(await fmOf(a)), _sync: "conflict", _conflict: { title: { mine: "x", theirs: "a" } } })]));
+  const p = pend("a", "queued");
+  const r = plan(await input([a], [file("_caldav/aaaaaaaa.md", { ...(await fmOf(a)), _sync: "conflict", _conflict: { title: { mine: "x", theirs: "a" } } })], { pending: new Map([["a", p]]) }));
   expect(r).toEqual([{ op: "update", path: "_caldav/aaaaaaaa.md", set: { _sync: "ok" }, unset: ["_conflict"] }]);
 });
 
@@ -205,6 +206,18 @@ test("duplicate-uid-file-marked-rejected", async () => {
   expect(r).toEqual([{ op: "update", path: "_caldav/copy.md", set: { _sync: "rejected", _sync_msg: "重複的投影檔（與 _caldav/aaaaaaaa.md 相同 _uid）" }, unset: [] }]);
   const k = plan(await input([a], [file("_caldav/aaaaaaaa.md", await fmOf(a)), file("_caldav/0new.md", await fmOf(a))], { known: new Set(["_caldav/aaaaaaaa.md"]) }));
   expect(k).toEqual([{ op: "update", path: "_caldav/0new.md", set: { _sync: "rejected", _sync_msg: "重複的投影檔（與 _caldav/aaaaaaaa.md 相同 _uid）" }, unset: [] }]);
+});
+
+test("upstream-rejection-persists", async () => {
+  const a = o("a", "aaaaaaaa");
+  const rejected = { ...(await fmOf(a)), _sync: "rejected", _sync_msg: "重複任務的完成請在提醒事項操作" };
+  expect(plan(await input([a], [file("_caldav/aaaaaaaa.md", rejected)]))).toEqual([]);
+});
+
+test("livesync-conflict-marker-persists", async () => {
+  const a = o("a", "aaaaaaaa");
+  const marked = { ...(await fmOf(a)), _sync: "conflict", _conflict: { title: { mine: "裝置版", theirs: "a" } } };
+  expect(plan(await input([a], [file("_caldav/aaaaaaaa.md", marked)]))).toEqual([]);
 });
 
 test("never-delete", () => {

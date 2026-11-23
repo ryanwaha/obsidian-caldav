@@ -57,7 +57,7 @@ export class UpstreamRunner {
             const st = await engine.client.move(obj!.href, `${result.move}${name}`);
             if (st < 200 || st >= 300) reject(`搬移清單失敗（HTTP ${st}）`);
           }
-          if (set._sync !== "rejected" && (fm._sync === "rejected" || fm._sync === "conflict")) { set._sync = "ok"; unset.push("_sync_msg"); }
+          if (set._sync !== "rejected" && (fm._sync === "rejected" || fm._sync === "conflict")) { set._sync = "ok"; unset.push("_sync_msg", "_conflict"); }
           this.syncSoon();
         } catch (e) {
           reject(e instanceof Error ? e.message : String(e));

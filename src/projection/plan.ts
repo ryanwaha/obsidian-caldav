@@ -32,6 +32,8 @@ export interface ReconcileInput {
 const MSG_FOREIGN = "不是投影檔";
 const MSG_OUT_OF_SCOPE = "集合不在投影範圍";
 const MSG_MOVE_HAS_BODY = "搬移目標已有內容，請手動合併";
+/** 對帳自己產生的 rejected 訊息；狀態恢復時由對帳清除 */
+const RECONCILE_MSGS = new Set([MSG_FOREIGN, MSG_OUT_OF_SCOPE, MSG_MOVE_HAS_BODY]);
 
 /** 受管欄位：投影會設定或清除的鍵。M6-2 的 `_conflict`、`_request` 不在此列，對帳不碰。 */
 const MANAGED = ["title", "status", "due", "due_time", "start", "start_time", "end", "end_time", "list",
@@ -170,6 +172,18 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
     if (p?.state === "conflict" && p.conflict) want = { ...base, _sync: "conflict", _conflict: conflictOf(o.kind, p.conflict) } as ProjFm;
     else if (p?.state === "failed") want = { ...base, _sync: "rejected", _sync_msg: p.lastError ?? "寫回失敗" };
     const d = diff(cur.fm!, want);
+    // 上行被拒絕的標記（值已回滾）保留到使用者下一次被接受的修改，由上行執行器清除；對帳自己的訊息不在此列
+    if (!p && cur.fm!._sync === "rejected" && !RECONCILE_MSGS.has(String(cur.fm!._sync_msg ?? ""))) {
+      delete (d.set as Record<string, unknown>)._sync;
+      delete (d.set as Record<string, unknown>)._sync_msg;
+      d.unset = d.unset.filter((k) => k !== "_sync_msg");
+    }
+    // LiveSync 衝突由伺服器合併後寫下的 `_conflict`：保留到使用者處理（dismiss 或再次修改），不可被對帳清掉（§8.7）
+    if (!p && cur.fm!._sync === "conflict") {
+      delete (d.set as Record<string, unknown>)._sync;
+      delete (d.set as Record<string, unknown>)._conflict;
+      d.unset = d.unset.filter((k) => k !== "_conflict");
+    }
     if (p?.state === "queued") {
       // 使用者的修改還在送出途中：不蓋掉（review focus 2）
       for (const k of Object.keys(d.set)) if (KEEP_WHILE_QUEUED.has(k)) delete (d.set as Record<string, unknown>)[k];
