@@ -1,6 +1,6 @@
 # M6 伺服器端投影：設計文件
 
-> 狀態：設計已核可（2026-11-23），待寫實作計畫
+> 狀態：設計已核可（2026-11-23）；M6-0 實測帶來的變更（§6.2 日期拆欄、§8.7 衝突處理）**待使用者確認**
 > 上游文件：`~/docs/homelab/services/obsidian-caldav.md`（現行 0.5.0 架構）。M6 上線後，該文件依本設計改寫。
 
 ---
@@ -115,7 +115,7 @@ status: needs-action          # VTODO：needs-action / in-process / completed / 
 due: 2026-11-24               # VTODO；型別 date，一律只放日期
 due_time: "09:30"             # 型別 text（HH:mm）；沒有此欄位 = 全天
 # start / start_time / end / end_time   # VEVENT 用這些，取代 status / due / due_time
-list: tasks                   # 集合的短名；改了觸發 MOVE（S4 驗證不過則改唯讀）
+list: tasks                   # 集合的短名；改了觸發 MOVE（S4 已驗證）
 # 系統欄位（改了會被回滾）
 aliases: [交週報]              # 跟著 title；供 [[ 自動完成
 _kind: VTODO
@@ -134,7 +134,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 ```
 
 - **可寫性**沿用 `src/ical/editable.ts`：重複 VTODO 的 `status` 唯讀；重複 VEVENT、帶 override 的物件全部唯讀；`_deleted: true` 時全部唯讀。
-- **時間格式（S3 後改）**：Obsidian 的 property 型別是整個 vault 一種（`.obsidian/types.json`，且不經 LiveSync 同步），同一欄位不能有時是 date、有時是 datetime（date 型別會藏掉時間、datetime 型別會把全天變成 00:00）。所以日期與時間拆成兩欄：`due`（date）＋`due_time`（text，`HH:mm`）。沒有 `due_time` 寫回 `VALUE=DATE`，有就寫 `TZID=Asia/Taipei`（E3）；使用者新增或刪除 `due_time` 即改變形式。客戶端與伺服器模式啟動時用 `app.metadataTypeManager.setType` 設定 `due`、`start`、`end` 為 date，`*_time` 為 text（每台裝置各自需要）。
+- **時間格式（S3 後改，待使用者確認；M6-1 開頭補測 `due_time` 在 Properties／Bases 的寫入原文——`09:30` 不加引號時 YAML 1.1 會當成數字——以及各裝置 `setType` 的效果；格式不合 `HH:mm` → `_sync: rejected`）**：Obsidian 的 property 型別是整個 vault 一種（`.obsidian/types.json`，且不經 LiveSync 同步），同一欄位不能有時是 date、有時是 datetime（date 型別會藏掉時間、datetime 型別會把全天變成 00:00）。所以日期與時間拆成兩欄：`due`（date）＋`due_time`（text，`HH:mm`）。沒有 `due_time` 寫回 `VALUE=DATE`，有就寫 `TZID=Asia/Taipei`（E3）；使用者新增或刪除 `due_time` 即改變形式。客戶端與伺服器模式啟動時用 `app.metadataTypeManager.setType` 設定 `due`、`start`、`end` 為 date，`*_time` 為 text（每台裝置各自需要；前提是 LiveSync 的 Hidden File Sync 不啟用，這是 `services/obsidian-server.md` 既有的原則）。
 - **系統欄位一律 `_` 前綴**，讓人一眼看出改了無效；`aliases` 例外（Obsidian 指定名稱）。
 - `_hash` 定義：可寫欄位依固定順序、正規化值後序列化再雜湊。客戶端與伺服器用同一函式。
 
@@ -228,7 +228,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 
 ### 8.7 LiveSync 衝突（S5 後新增）
 
-- frontmatter 對 body、frontmatter 的不同欄位，LiveSync 會自動合併，不需處理。
+- frontmatter 對 body、frontmatter 中**不相鄰**的欄位，LiveSync 會自動合併（S5）。**相鄰欄位未測**：§6.2 的可寫欄位彼此相鄰，伺服器每次投影又一定改到 `_etag`／`_hash`／`_sync`，所以 M6-1 開頭要補測「相鄰欄位」與「完整 §6.2 frontmatter（含 `_` 欄位）」兩種情境。
 - 同一行被兩邊改成不同值（使用者改欄位的同時，伺服器因原生客戶端的修改重寫同一欄位）會產生 LiveSync 衝突，對話框可能跳在 headless 伺服器上。
 - 伺服器模式：
   1. 檔案最近 10 s 內收到遠端修改時延後重寫，且先處理完上行再重新投影。
@@ -247,7 +247,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 - headless Obsidian 成為正式依賴；停擺時上下行暫停，筆記與投影檔仍可讀。
 - 越界編輯只能事後回滾，不能事前阻止。
 - 上行多一跳 LiveSync，約數秒。
-- 使用者在某裝置寫 body 期間，伺服器改寫 frontmatter，可能產生 LiveSync conflict（S5）。
+- 同一行被裝置與伺服器同時改成不同值時產生 LiveSync 衝突，需要伺服器以程式解決（§8.7，S5）。
 - 快照標籤會過期；更新需手動指令。
 - Bases／frontmatter 表現力有限；重複任務唯讀。
 - 只在 tailnet 內可用（不變）。
@@ -262,10 +262,10 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 | # | 項目 | 結果 | 對設計的影響 |
 |---|---|---|---|
 | S1 | Live Preview 中 wikilink 的節點與 widget | ✅ | 依節點序列 `formatting-link-start` → `hmd-internal-link*` → `formatting-link-end` 找連結，在 `formatting-link-end.to` 加 `Decoration.widget({side:1})`；程式碼自然排除；嵌入不加 chip（§7.2） |
-| S2 | `[[` 自動完成選 alias 的格式 | ✅ | 插入 `[[短ID\|標題]]`；alias 含 `\|`、`#` 也正確解析，不需清理 |
+| S2 | `[[` 自動完成選 alias 的格式 | ✅ | 插入 `[[短ID\|標題]]`；已驗證 alias 含 `：`、`\|`、`#` 可正確解析。投影時 alias 仍要把 `[[`、`]]`、換行替換掉（未測，會破壞連結語法） |
 | S3 | Properties／Bases 編輯的事件 | ✅＋⚠️ | 每次確認只產生一組 modify＋changed，Bases 表格可直接編輯；debounce 1 s。**同一 property 只能有一種型別** → 日期欄位拆分（§6.2） |
 | S4 | Radicale `MOVE` | ✅ | UID、內容、ETag 都保留；`list` 維持可寫（§8.4） |
-| S5 | LiveSync 同時修改 | ⚠️ | frontmatter 對 body、不同欄位都自動合併；同一行不同值會衝突，且對話框可能卡在 headless → 新增 §8.7 |
+| S5 | LiveSync 同時修改 | ⚠️ | frontmatter 對 body、**不相鄰**的欄位會自動合併；相鄰行未測；同一行不同值會衝突，且對話框可能卡在 headless → 新增 §8.7 |
 | S6 | headless 的 `secretStorage` | ✅ | 沿用；`basic` 模式只是混淆，列入 §10 |
 
 ## 12. 從 0.5.0 切換（決策紀錄，Claude 的判斷）

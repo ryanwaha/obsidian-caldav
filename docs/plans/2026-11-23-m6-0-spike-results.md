@@ -82,7 +82,7 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
   - `|`：只有第一個 `|` 分隔目標與標籤；`metadataCache` 的 `link` 為 `k3f9x2qb`，`displayText` 為完整標籤；閱讀模式解析正確。✅
   - `#`：Live Preview 會把標籤裡的 `#帳單` 上色成 hashtag，但 `metadataCache` 的 `tags` 為空，**不會變成筆記標籤**。只影響外觀。
   - `：` 等全形字元無影響。
-- **對設計的影響**：投影時 alias 不需要清理字元。S1 的判斷規則（目標 = 第一個不含 `link-alias` 的 `hmd-internal-link` 節點）在標籤含 hashtag 節點時仍正確。
+- **對設計的影響**：已驗證的字元（`：`、`|`、`#`）不需清理。未測：標題含 `[[`、`]]`、換行，以及連結放在 Markdown 表格裡（`|` 會切斷表格）；投影時 alias 至少要替換 `[[`、`]]`、換行。S1 的判斷規則（目標 = 第一個不含 `link-alias` 的 `hmd-internal-link` 節點）在標籤含 hashtag 節點時仍正確。
 
 ## S3 Properties 與 Bases 編輯產生的事件 —— ✅ 通過（桌面 app 1.15.1），附一項設計問題
 
@@ -123,7 +123,7 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
 | 情境 | 結果 |
 |---|---|
 | A 改 frontmatter（`status`），B 在 body 加一行 | ✅ 自動合併，兩邊逐字相同且包含兩邊的修改；無對話框；伺服器上的 `_conflicts` 數秒後自動清除 |
-| A 改 `title`，B 改 `due`（不同欄位，中間隔一行） | ✅ 同上 |
+| A 改 `title`，B 改 `due`（不同欄位，中間隔一行） | ✅ 同上。**相鄰行未測**，M6-1 補測 |
 | A、B 把 `status` 改成不同值（同一行） | ❌ 無法自動合併：A 跳出 LiveSync 的「Conflicting changes」對話框（逐字 diff，畫面上兩個值混成 `cancellompleted`，選項 Use Base／Use Conflicted／Concat both／Not now）；B 沒有對話框；**兩邊檔案不一致**，伺服器保留衝突版本 |
 
 **觀察**
@@ -138,3 +138,10 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
 3. 裝置之間（iPhone 對 Windows）同一行的衝突是 LiveSync 本來就有的行為，不是 M6 新增的，維持由使用者在 LiveSync 對話框解決。
 
 **👤 待使用者提供（Review Focus 3）**：iPhone 與 Windows 上 LiveSync 的這三個設定值：`disableMarkdownAutoMerge`、`resolveConflictsByNewerFile`、`writeDocumentsIfConflicted`（設定畫面的「Conflict resolution」一節）。正式伺服器 vault 為 false／false／false。
+
+## 清理（Task 8）—— 2026-11-23
+
+- spike 實例：`stop.sh` → `stopped`；`~/m6-spike` 已刪除（內含測試用 LiveSync `data.json`）。
+- CouchDB：`DELETE /m6-spike` → `{"ok":true}`；`_all_dbs` → `["_replicator","_users","markdowns"]`。
+- Radicale：`DELETE /ryanw/m6-spike/` → 200；PROPFIND `/ryanw/` 只剩 `tasks/`、`test/`；`test` 裡 `m6-spike` 開頭的物件數 0。
+- 正式實例：`~/.config/obsidian/obsidian.json` 只有主 vault（`updateDisabled: true`，即 1.13.7 凍結的來源）；`obsidian.service` active。
