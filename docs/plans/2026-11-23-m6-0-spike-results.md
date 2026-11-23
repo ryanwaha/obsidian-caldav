@@ -83,3 +83,33 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
   - `#`：Live Preview 會把標籤裡的 `#帳單` 上色成 hashtag，但 `metadataCache` 的 `tags` 為空，**不會變成筆記標籤**。只影響外觀。
   - `：` 等全形字元無影響。
 - **對設計的影響**：投影時 alias 不需要清理字元。S1 的判斷規則（目標 = 第一個不含 `link-alias` 的 `hmd-internal-link` 節點）在標籤含 hashtag 節點時仍正確。
+
+## S3 Properties 與 Bases 編輯產生的事件 —— ✅ 通過（桌面 app 1.15.1），附一項設計問題
+
+以真實點擊與輸入操作（日期欄以 `fill` 填值，Chromium 原生 date picker 彈窗不在 DOM 裡，點不到；手動點選 picker 理論上同樣在確認時才寫入，但未實測）：
+
+| 操作 | 事件 | 寫入時機 | 寫入的原始文字 |
+|---|---|---|---|
+| Properties 改 `title`（打字＋Enter） | modify ×1、changed ×1（+5 ms） | 按 Enter 時；打字過程不寫 | `title: 交週報二` |
+| Properties 改 `due`（date input） | modify ×1、changed ×1（+3 ms） | **失焦時**才寫；只在輸入框裡改值不會寫 | `due: 2026-12-01` |
+| Properties 改 `due` 為 datetime | modify ×1、changed ×1 | 失焦時 | `due: 2026-12-01T09:30:00`（本地時間，帶秒，無時區） |
+| Bases 表格改 `status` 儲存格 | modify ×1、changed ×1（+13 ms） | Enter | `status: completed` |
+| Bases 表格改 `due`（datetime） | modify ×1、changed ×1（+9 ms） | Enter | `due: 2026-12-24T10:00:00` |
+| body 打一行字 | 打完約 2 s 後 modify ×1、changed ×1（編輯器自動存檔） | 自動存檔 | body 改變，frontmatter 不動 |
+
+- **Bases 表格可以直接編輯**：儲存格本身就是 Properties 的 widget（`.metadata-property-value`），寫入路徑相同。
+- 每次「確認」只產生一組 modify + changed，事件間隔最大 18 ms；**沒有逐字寫入**。
+- **debounce 建議**：伺服器以 `changed` 為觸發，依檔案 debounce **1 s**（規則：單次編輯內最大間隔 18 ms × 2，下限 1 s）。用途是合併連續幾個欄位的修改，以及 LiveSync 逐筆送達的修改。
+- body 編輯只產生 body 變化，伺服器比對 frontmatter 沒變就不動 CalDAV（設計 §8.2 已涵蓋）。
+
+### ⚠️ 設計問題：同一個 property 只能有一種型別
+
+- Obsidian 的 property 型別是**整個 vault 一個**（`.obsidian/types.json`），而 `.obsidian/` 不經 LiveSync 同步，每台裝置各自一份。
+- 實測：
+  - `due` 型別為 `date` 時，`2026-12-24T10:00:00` 顯示成 `2026-12-24`，**時間被藏起來**，在那格編輯就會丟掉時間。
+  - 型別為 `datetime` 時，`2026-11-30` 顯示成 `2026-11-30T00:00`，編輯後會寫成帶時間，**全天變成定時**（違反 E3「保留原本形式」）。
+- 設計 §6.2 讓 `due` 同時承載 date 與 datetime，在 Properties／Bases 上不可行。提議改法（待使用者確認，見 Task 8）：
+  - `due`（型別 `date`）：一律只放日期；
+  - `due_time`（型別 `text`，`HH:mm`）：有時間才有值。沒有 `due_time` 就是全天（`VALUE=DATE`），有就是 `TZID=Asia/Taipei` 的定時。
+  - VEVENT 的 `start`／`end` 同理拆成 `start`、`start_time`、`end`、`end_time`。
+  - 客戶端與伺服器模式啟動時，以 `app.metadataTypeManager.setType` 設定這些欄位的型別（每台裝置各自需要，因為 `types.json` 不同步）。
