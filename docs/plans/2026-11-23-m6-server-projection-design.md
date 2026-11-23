@@ -235,6 +235,12 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
   2. 偵測 `_caldav/` 檔案的 LiveSync 衝突並以程式解決：frontmatter 取 CalDAV 的值，裝置版本的不同值寫入 `_conflict`（交給 D8 的客戶端對話框），body 不同時串接。已實測可行（S7）：`localDatabase.getDBEntry(path,{conflicts:true})` → 組內容 → `databaseFileAccess.storeContent` → `services.conflict.resolveByDeletingRevision`。這些是 LiveSync 內部 API：啟動時檢查方法都存在才啟用，否則停用自動解衝突並 Notice；LiveSync 版本列入凍結清單。
 - 裝置之間（iPhone 對 Windows）的同行衝突是 LiveSync 既有行為，維持由使用者在 LiveSync 對話框處理。
 
+### 8.8 待解：客戶端回滾會誤判伺服器的動作（M6-1 review 發現，M6-2/3 前要解）
+
+- 客戶端看到的 `_caldav/` 變化大多來自伺服器：搬移的 rename、`merge-into` 刪掉的空檔、每次 frontmatter 重寫。LiveSync 以路徑為文件 id，伺服器的 rename 傳到其他裝置時很可能是「舊路徑刪除＋新路徑建立」。
+- 失敗情境：客戶端守門看到刪除 → 依 §8.6 立即還原舊檔 → 經 LiveSync 送回伺服器 → 伺服器看到舊 `_uid` 的檔案、搬移目標已有內容 → 標 rejected，形成重複檔與來回拉鋸。
+- M6-2/3 實測第一項：客戶端能否分辨「LiveSync 套用的變更」與「本機使用者的動作」。不能分辨 → 取消客戶端即時還原（或只在確定是本機動作時還原），回滾只由伺服器做。伺服器兜底回滾也必須排除自己 `merge-into` 造成的刪除。
+
 ## 9. 對其他服務與流程的影響
 
 - **vault git**：投影檔照常 commit。
