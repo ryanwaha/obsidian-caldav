@@ -6,10 +6,13 @@ import { toLocalParts } from "./dates";
 import { listName, type ProjFm, WRITABLE_KEYS, type WritableKey } from "./types";
 
 /** 可寫欄位依固定順序正規化後的 SHA-256 前 16 hex（設計 §6.2 `_hash`；客戶端與伺服器共用）。 */
-export async function writableHash(fm: Partial<Record<WritableKey, unknown>>): Promise<string> {
+export function writableHash(fm: Partial<Record<WritableKey, unknown>>): string {
+  // 同步計算（chip 渲染時要比對）：FNV-1a，兩個不同種子各 32 bit → 16 hex（M6-3）。不是密碼學用途，只判斷是否變動。
   const canon = JSON.stringify(WRITABLE_KEYS.map((k) => (fm[k] == null ? null : String(fm[k]))));
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon)));
-  return [...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const bytes = new TextEncoder().encode(canon);
+  let a = 0x811c9dc5, b = 0x01000193 ^ 0x5bd1e995;
+  for (const x of bytes) { a ^= x; a = Math.imul(a, 0x01000193) >>> 0; b ^= x; b = Math.imul(b, 0x01000193) >>> 0; b = (b ^ (b >>> 15)) >>> 0; }
+  return a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
 }
 
 function description(ics: string): string | undefined {
@@ -56,7 +59,7 @@ export async function projectFields(o: CalObject): Promise<ProjFm> {
   if (notes !== undefined) fm._notes = notes;
   if (o.rrule) fm._rrule = describeRrule(o.rrule);
   fm._etag = o.etag;
-  fm._hash = await writableHash(fm as Partial<Record<WritableKey, unknown>>);
+  fm._hash = writableHash(fm as Partial<Record<WritableKey, unknown>>);
   fm._sync = "ok";
   fm._deleted = false;
   return fm as unknown as ProjFm;

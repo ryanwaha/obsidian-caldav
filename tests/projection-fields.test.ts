@@ -68,3 +68,11 @@ test("all-day vevent end is inclusive (DTEND − 1 day, like Full Calendar)", as
   const span = await projectFields(await obj(vevent(["DTSTART;VALUE=DATE:20261130", "DTEND;VALUE=DATE:20261202"])));
   expect(span).toMatchObject({ start: "2026-11-30", end: "2026-12-01" });
 });
+
+test("writableHash is sync and stable", () => {
+  const h = writableHash({ title: "甲", list: "tasks" });
+  expect(typeof h).toBe("string");
+  expect(h).toMatch(/^[0-9a-f]{16}$/);
+  expect(writableHash({ list: "tasks", title: "甲" })).toBe(h);
+  expect(writableHash({ list: "tasks", title: "乙" })).not.toBe(h);
+});

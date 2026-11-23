@@ -55,6 +55,7 @@ export default class CalDavPlugin extends Plugin {
       });
     };
     this.addSettingTab(new CalDavSettingTab(this.app, this));
+    if (this.settings.mode === "client") { this.loadClient(); return; }
     this.addCommand({ id: "sync-now", name: "立即同步", callback: () => void this.syncNow(true) });
     this.addCommand({ id: "insert-ref", name: "插入任務／事件參照", editorCallback: (editor) => this.insertRef(editor) });
     this.addCommand({ id: "new-task", name: "新建任務並插入參照", editorCallback: (editor, ctx) => this.newTask(editor, ctx) });
@@ -90,6 +91,11 @@ export default class CalDavPlugin extends Plugin {
       }, 60_000));
       void this.syncNow(false, "啟動");
     });
+  }
+
+  /** M6 裝置模式：不建立 CalDAV session、不同步；只註冊投影檔的 chip、守門與指令（M6-3）。 */
+  private loadClient(): void {
+    // Task 3–6 在這裡註冊
   }
 
   onunload() {

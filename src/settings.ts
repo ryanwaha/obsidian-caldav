@@ -4,12 +4,12 @@ import { normalizeServerUrl } from "./session";
 
 export interface Settings {
   serverUrl: string; username: string; syncIntervalMinutes: number; defaultCollection: string;
-  /** M6：server = 投影到 _caldav/（只在 headless 伺服器上用）；client = 0.5.0 行為 */
-  mode: "client" | "server";
+  /** M6：legacy = 0.5.0 行為（預設）；client = 裝置（只讀寫 _caldav/，不連 CalDAV）；server = 投影與上行（只在 headless 伺服器） */
+  mode: "legacy" | "client" | "server";
   /** 投影的集合 href；空 = 全部 */
   projectCollections: string[];
 }
-export const DEFAULT_SETTINGS: Settings = { serverUrl: "", username: "", syncIntervalMinutes: 5, defaultCollection: "", mode: "client", projectCollections: [] };
+export const DEFAULT_SETTINGS: Settings = { serverUrl: "", username: "", syncIntervalMinutes: 5, defaultCollection: "", mode: "legacy", projectCollections: [] };
 export const SECRET_ID = "obsidian-caldav-password";
 
 export class CalDavSettingTab extends PluginSettingTab {
@@ -50,8 +50,8 @@ export class CalDavSettingTab extends PluginSettingTab {
       });
 
     containerEl.createEl("h3", { text: "投影（M6）" });
-    new Setting(containerEl).setName("模式").setDesc("server：把 CalDAV 物件投影到 _caldav/。整個系統只能有一台（headless 伺服器）設為 server")
-      .addDropdown((d) => d.addOption("client", "client").addOption("server", "server").setValue(s.mode)
+    new Setting(containerEl).setName("模式").setDesc("改了要重新啟動 Obsidian。server：整個系統只能有一台（headless 伺服器）；client：裝置，不需要 CalDAV 帳密")
+      .addDropdown((d) => d.addOption("legacy", "legacy（0.5.0）").addOption("client", "client（裝置）").addOption("server", "server").setValue(s.mode)
         .onChange(async (v) => { s.mode = v as Settings["mode"]; await this.plugin.saveSettings(); }));
     new Setting(containerEl).setName("投影的清單").setDesc("集合 href，逗號分隔；留空 = 全部")
       .addText((t) => { t.setValue(s.projectCollections.join(", ")); onBlur(t.inputEl, (v) => (s.projectCollections = v.split(",").map((x) => x.trim()).filter(Boolean))); });
