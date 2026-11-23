@@ -22,6 +22,7 @@ import { type Config, SessionManager } from "./session";
 import { CalDavSettingTab, DEFAULT_SETTINGS, SECRET_ID, type Settings } from "./settings";
 import { SyncEngine } from "./sync/engine";
 import { ProjectionWriter } from "./projection/writer";
+import { UpstreamRunner } from "./projection/upstreamRunner";
 import { type CalObject, type CollectionInfo, type Patch, type PendingUpdate, type SyncReport, isUpdate } from "./types";
 
 export default class CalDavPlugin extends Plugin {
@@ -65,7 +66,11 @@ export default class CalDavPlugin extends Plugin {
     this.registerDomEvent(document, "resume" as keyof DocumentEventMap, () => this.foregroundSync("resume"));
     this.registerEvent(this.app.workspace.on("file-open", () => this.foregroundSync("file-open")));
     this.app.workspace.onLayoutReady(async () => {
-      if (this.settings.mode === "server") ProjectionWriter.setPropertyTypes(this.app);
+      if (this.settings.mode === "server") {
+        ProjectionWriter.setPropertyTypes(this.app);
+        new UpstreamRunner(this.app, async () => this.sessions.get(this.config()).catch(() => undefined), this.projection, () => void this.syncNow(false, "上行"))
+          .start((r) => this.registerEvent(r));
+      }
       this.resetInterval();
       await this.reloadIndex(); // 先顯示快取（離線也可用），再同步
       this.watchVault();

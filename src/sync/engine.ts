@@ -16,7 +16,7 @@ export class SyncEngine {
   private running?: Promise<SyncReport>;
   private last?: SyncReport;
 
-  constructor(private client: CalDavClient, private cache: CacheStore, private now: () => number = Date.now) {}
+  constructor(readonly client: CalDavClient, private cache: CacheStore, private now: () => number = Date.now) {}
 
   get lastReport(): SyncReport | undefined { return this.last; }
 
