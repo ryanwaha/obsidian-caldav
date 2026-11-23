@@ -27,9 +27,9 @@ test("isLocalDelete: only isFileProcessing counts (recentlyTouched is true for a
 test("OwnOps: the guard ignores events it caused itself", async () => {
   const { OwnOps } = await import("../src/client/guardLogic");
   const o = new OwnOps(() => 1000);
-  o.mark("_caldav/a.md");
-  expect(o.has("_caldav/a.md")).toBe(true);
-  expect(o.has("_caldav/b.md")).toBe(false);
+  o.mark("caldav/a.md");
+  expect(o.has("caldav/a.md")).toBe(true);
+  expect(o.has("caldav/b.md")).toBe(false);
   const later = new OwnOps(() => 1000 + 11_000); (later as unknown as { m: Map<string, number> }).m = (o as unknown as { m: Map<string, number> }).m;
-  expect(later.has("_caldav/a.md")).toBe(false);
+  expect(later.has("caldav/a.md")).toBe(false);
 });

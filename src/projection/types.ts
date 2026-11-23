@@ -1,5 +1,6 @@
 /** 投影檔（設計 §6）。 */
-export const PROJ_DIR = "_caldav";
+/** 投影目錄。它是 PKM 的一部分，不以底線隱藏（使用者決定，2026-11-23）。 */
+export const PROJ_DIR = "caldav";
 export const WRITABLE_KEYS = ["title", "status", "due", "due_time", "start", "start_time", "end", "end_time", "list"] as const;
 export type WritableKey = (typeof WRITABLE_KEYS)[number];
 

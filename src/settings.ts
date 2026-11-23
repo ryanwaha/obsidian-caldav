@@ -4,7 +4,7 @@ import { normalizeServerUrl } from "./session";
 
 export interface Settings {
   serverUrl: string; username: string; syncIntervalMinutes: number; defaultCollection: string;
-  /** M6：legacy = 0.5.0 行為（預設）；client = 裝置（只讀寫 _caldav/，不連 CalDAV）；server = 投影與上行（只在 headless 伺服器） */
+  /** M6：legacy = 0.5.0 行為（預設）；client = 裝置（只讀寫 caldav/，不連 CalDAV）；server = 投影與上行（只在 headless 伺服器） */
   mode: "legacy" | "client" | "server";
   /** 投影的集合 href；空 = 全部 */
   projectCollections: string[];

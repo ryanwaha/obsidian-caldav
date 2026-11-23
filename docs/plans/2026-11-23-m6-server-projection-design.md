@@ -101,9 +101,9 @@ flowchart LR
 - **範圍（使用者決定）**：白名單內集合的所有物件都投影，包括已完成、已取消的 VTODO（含 iOS 重複提醒每次完成產生的副本）、所有 VEVENT（含過去與重複事件）。沒有時間篩選。白名單在伺服器模式設定裡；`/ryanw/test/` 不在白名單內。估計十年約 1 萬個檔案。
 - 集合從白名單移除時：既有投影檔不刪、body 不動，frontmatter 標 `_sync: rejected`、`_sync_msg: 集合不在投影範圍`，之後不再更新。
 
-- 目錄：vault 根目錄的 `_caldav/`（我的提議，可在實作時改名，但必須是單一固定目錄）。
+- 目錄：vault 根目錄的 `caldav/`。不以底線開頭：投影檔（含 body）是 PKM 的一部分（使用者決定，2026-11-23；原提議為 `_caldav/`）。
 - 檔名：`<短ID>.md`，短 ID 算法沿用 0.5.0（`sha256(UID)` → Crockford base32 小寫前 8 位）。
-- 清單列表：`_caldav/_lists.md`，frontmatter 列出集合（href、顯示名稱、元件類型），供客戶端新建時離線選取。由伺服器維護，同樣適用回滾規則。
+- 清單列表：`caldav/_lists.md`，frontmatter 列出集合（href、顯示名稱、元件類型），供客戶端新建時離線選取。由伺服器維護，同樣適用回滾規則。
 
 ### 6.2 frontmatter
 
@@ -166,7 +166,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 
 | 元件 | 職責 | 來源 |
 |---|---|---|
-| chip 渲染 | 對解析到 `_caldav/` 檔案的 wikilink，在連結**後面**附加 chip（☐、日期、⋯、狀態燈）；資料讀 `metadataCache`；`changed` 時重繪 | 改寫 `src/render/`；閱讀模式選 `a.internal-link`，Live Preview 用 `Decoration.widget(side:1)` |
+| chip 渲染 | 對解析到 `caldav/` 檔案的 wikilink，在連結**後面**附加 chip（☐、日期、⋯、狀態燈）；資料讀 `metadataCache`；`changed` 時重繪 | 改寫 `src/render/`；閱讀模式選 `a.internal-link`，Live Preview 用 `Decoration.widget(side:1)` |
 | chip 寫入 | 所有修改透過 `processFrontMatter` 寫可寫欄位或 `_request` | 新 |
 | 狀態燈 | `_sync` 為 rejected／conflict → 紅；目前可寫欄位雜湊 ≠ `_hash` → 等待中；否則正常；`_deleted` → 已刪除 | 新 |
 | 守門 | 投影檔 `changed` 時本機檢查，改了唯讀欄位立即通知（不自行還原，由伺服器回滾）；刪除／改名立即還原並通知 | 新 |
@@ -200,10 +200,10 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 
 ### 8.3 新建
 
-1. 客戶端指令 → 產生 UUIDv4 → 算短 ID；`_caldav/` 已有同名檔就重產。
+1. 客戶端指令 → 產生 UUIDv4 → 算短 ID；`caldav/` 已有同名檔就重產。
 2. 建立投影檔：可寫欄位 + `_uid`、`_kind`，無 `_etag`；插入 `[[短ID|標題]]`。chip 顯示等待中。
 3. 伺服器看到無 `_etag` 且 `_uid` 不在快取 → `PUT If-None-Match:*` 到 `list` 指定的集合 → 重新投影。失敗 → `_sync: rejected`，檔案保留。
-4. `_caldav/` 裡出現沒有 `_uid` 的檔案（例如使用者手動新增）：伺服器不刪、不改 body，只寫 `_sync: rejected`、`_sync_msg: 不是投影檔`。
+4. `caldav/` 裡出現沒有 `_uid` 的檔案（例如使用者手動新增）：伺服器不刪、不改 body，只寫 `_sync: rejected`、`_sync_msg: 不是投影檔`。
 
 ### 8.4 搬移
 
@@ -222,7 +222,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 | 事件 | 客戶端 | 伺服器（兜底，權威） |
 |---|---|---|
 | 刪除投影檔 | 有內容可用時立即還原並通知 | 從 `projections` 還原完整檔案（含 body） |
-| 改名／搬出 `_caldav/` | `renameFile` 改回並通知 | 同左 |
+| 改名／搬出 `caldav/` | `renameFile` 改回並通知 | 同左 |
 | 改系統欄位 | 通知 | 重新投影 frontmatter |
 
 客戶端的還原內容來源留給實作者（記憶體快照、Obsidian `.trash` 等），但必須包含 body；做不到時只通知，交給伺服器。
@@ -233,13 +233,13 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 - 同一行被兩邊改成不同值（使用者改欄位的同時，伺服器因原生客戶端的修改重寫同一欄位）會產生 LiveSync 衝突，對話框可能跳在 headless 伺服器上。
 - 伺服器模式：
   1. 檔案最近 10 s 內收到遠端修改時延後重寫，且先處理完上行再重新投影。
-  2. 偵測 `_caldav/` 檔案的 LiveSync 衝突並以程式解決：frontmatter 取 CalDAV 的值，裝置版本的不同值寫入 `_conflict`（交給 D8 的客戶端對話框），body 不同時串接。已實測可行（S7）：`localDatabase.getDBEntry(path,{conflicts:true})` → 組內容 → `databaseFileAccess.storeContent` → `services.conflict.resolveByDeletingRevision`。這些是 LiveSync 內部 API：啟動時檢查方法都存在才啟用，否則停用自動解衝突並 Notice；LiveSync 版本列入凍結清單。
+  2. 偵測 `caldav/` 檔案的 LiveSync 衝突並以程式解決：frontmatter 取 CalDAV 的值，裝置版本的不同值寫入 `_conflict`（交給 D8 的客戶端對話框），body 不同時串接。已實測可行（S7）：`localDatabase.getDBEntry(path,{conflicts:true})` → 組內容 → `databaseFileAccess.storeContent` → `services.conflict.resolveByDeletingRevision`。這些是 LiveSync 內部 API：啟動時檢查方法都存在才啟用，否則停用自動解衝突並 Notice；LiveSync 版本列入凍結清單。
 - 裝置端的合併設定（2026-11-23 使用者提供的裝置 `data.json`）：`disableMarkdownAutoMerge: false`、`resolveConflictsByNewerFile: false`、`writeDocumentsIfConflicted: false`，與伺服器、S5/S8 實測時相同，所以上述合併結論適用於裝置。同一份設定也確認 `syncInternalFiles: false`（Hidden File Sync 關閉），§6.2「`types.json` 不同步、各裝置自設型別」的前提成立。
 - 裝置之間（iPhone 對 Windows）的同行衝突是 LiveSync 既有行為，維持由使用者在 LiveSync 對話框處理。
 
 ### 8.8 待解：客戶端回滾會誤判伺服器的動作（M6-1 review 發現，M6-2/3 前要解）
 
-- 客戶端看到的 `_caldav/` 變化大多來自伺服器：搬移的 rename、`merge-into` 刪掉的空檔、每次 frontmatter 重寫。LiveSync 以路徑為文件 id，伺服器的 rename 傳到其他裝置時很可能是「舊路徑刪除＋新路徑建立」。
+- 客戶端看到的 `caldav/` 變化大多來自伺服器：搬移的 rename、`merge-into` 刪掉的空檔、每次 frontmatter 重寫。LiveSync 以路徑為文件 id，伺服器的 rename 傳到其他裝置時很可能是「舊路徑刪除＋新路徑建立」。
 - 失敗情境：客戶端守門看到刪除 → 依 §8.6 立即還原舊檔 → 經 LiveSync 送回伺服器 → 伺服器看到舊 `_uid` 的檔案、搬移目標已有內容 → 標 rejected，形成重複檔與來回拉鋸。
 - **已解（S9）**：可以分辨。LiveSync 的 `storageAccessManager.isFileProcessing(path) || recentlyTouched(file)` 為 true 即為 LiveSync 帶來的變更。客戶端即時還原：刪除事件只看 `isFileProcessing(path)`（false＝本機；M6-3 e2e 發現 `recentlyTouched` 對所有「LiveSync 最後寫過」的檔都是 true，不能用來判斷刪除）；改名事件一律是本機動作（遠端改名是刪除＋建立）；內部 API 特徵檢查不通過時不做客戶端還原。伺服器兜底回滾必須排除自己的寫入、改名與 `merge-into` 刪除。
 
@@ -290,7 +290,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 
 ## 13. 留給實作者
 
-- `_caldav/` 目錄名稱、`_lists.md` 格式細節。
+- `caldav/` 目錄名稱、`_lists.md` 格式細節。
 - 短 ID 撞號（既有物件）時的檔名規則。限制：先出現者保留 8 位；結果必須跨重啟穩定。
 - debounce 長度、同步間隔、通知文字。
 - 客戶端回滾的內容來源（§8.6）。

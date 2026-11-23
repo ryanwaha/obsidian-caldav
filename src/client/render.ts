@@ -72,7 +72,7 @@ class ChipWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 
-/** Live Preview：在指向 _caldav/ 的 wikilink 後面加 chip（S1 規則） */
+/** Live Preview：在指向 caldav/ 的 wikilink 後面加 chip（S1 規則） */
 export function chipExtension(app: App, version: () => number): Extension {
   const build = (view: EditorView): DecorationSet => {
     const b = new RangeSetBuilder<Decoration>();

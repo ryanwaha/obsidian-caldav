@@ -19,7 +19,7 @@ async function setup(lines = ["STATUS:NEEDS-ACTION"]) {
   const o = (await parseResource(todo("a", "原", lines), { href: `${T}a.ics`, etag: '"e1"', collection: T })) as CalObject;
   await cache.upsertObjects([o]);
   const fm = { ...(await projectFields(o)) } as Record<string, unknown>;
-  await cache.putProjection({ path: "_caldav/a.md", uid: "a", fm, body: "", writtenAt: 0 });
+  await cache.putProjection({ path: "caldav/a.md", uid: "a", fm, body: "", writtenAt: 0 });
   return { cache, o, fm };
 }
 function deps(cache: CacheStore, over: Partial<UpstreamDeps> = {}) {
@@ -45,8 +45,8 @@ describe("C1 snapshot never absorbs unprocessed user edits", () => {
   test("processUpstream snapshot uses the fm it processed, not a re-read", async () => {
     const { cache, fm } = await setup();
     const { d } = deps(cache);
-    await processUpstream("_caldav/a.md", { ...fm, title: "第一次" }, "", d);
-    expect((await cache.getProjection("_caldav/a.md"))!.fm.title).toBe("第一次");
+    await processUpstream("caldav/a.md", { ...fm, title: "第一次" }, "", d);
+    expect((await cache.getProjection("caldav/a.md"))!.fm.title).toBe("第一次");
   });
 });
 
@@ -54,7 +54,7 @@ describe("I1 MOVE before enqueue; pending follows the new href", () => {
   test("title + list in one edit", async () => {
     const { cache, fm } = await setup();
     const { d, calls } = deps(cache);
-    await processUpstream("_caldav/a.md", { ...fm, title: "新", list: "work" }, "", d);
+    await processUpstream("caldav/a.md", { ...fm, title: "新", list: "work" }, "", d);
     expect(calls[0]).toBe(`MOVE ${T}a.ics ${W}a.ics`);
     const p = (await cache.getPending(`upd:${W}a.ics`)) as PendingUpdate;
     expect(p).toMatchObject({ href: `${W}a.ics`, collection: W, patch: { summary: "新" } });
@@ -67,13 +67,13 @@ describe("I1 MOVE before enqueue; pending follows the new href", () => {
     const { cache, o, fm } = await setup();
     await enqueuePatch(cache, o, { status: "completed" }, new Date());
     const { d } = deps(cache);
-    await processUpstream("_caldav/a.md", { ...fm, list: "work" }, "", d);
+    await processUpstream("caldav/a.md", { ...fm, list: "work" }, "", d);
     expect(await cache.getPending(`upd:${W}a.ics`)).toMatchObject({ patch: { status: "completed" } });
   });
   test("MOVE failure rolls back only list; other fields still sent", async () => {
     const { cache, fm } = await setup();
     const { d, writes } = deps(cache, { move: async () => 412 });
-    await processUpstream("_caldav/a.md", { ...fm, title: "新", list: "work" }, "", d);
+    await processUpstream("caldav/a.md", { ...fm, title: "新", list: "work" }, "", d);
     expect(writes[0].set).toMatchObject({ list: "tasks", _sync: "rejected" });
     expect(writes[0].set).not.toHaveProperty("title");
     expect(await cache.getPending(`upd:${T}a.ics`)).toMatchObject({ patch: { summary: "新" } });
@@ -104,11 +104,11 @@ describe("I3 editing another field during an engine conflict", () => {
 
 describe("I4 duplicate _uid after a remote rename", () => {
   test("a new file with the same uid and no snapshot → rename it back", () => {
-    expect(chooseRestore("a", [{ path: "_caldav/new.md", uid: "a", hasSnap: false }])).toEqual({ kind: "rename-back", from: "_caldav/new.md" });
+    expect(chooseRestore("a", [{ path: "caldav/new.md", uid: "a", hasSnap: false }])).toEqual({ kind: "rename-back", from: "caldav/new.md" });
   });
   test("no other file → restore from snapshot", () => expect(chooseRestore("a", [])).toEqual({ kind: "restore" }));
   test("another snapshotted file with same uid → skip (it is the primary)", () => {
-    expect(chooseRestore("a", [{ path: "_caldav/x.md", uid: "a", hasSnap: true }])).toEqual({ kind: "skip" });
+    expect(chooseRestore("a", [{ path: "caldav/x.md", uid: "a", hasSnap: true }])).toEqual({ kind: "skip" });
   });
 });
 
@@ -135,7 +135,7 @@ describe("I7 object is looked up by the snapshot uid", () => {
     const other = (await parseResource(todo("b", "別的"), { href: `${T}b.ics`, etag: '"e"', collection: T })) as CalObject;
     await cache.upsertObjects([other]);
     const { d, writes } = deps(cache);
-    await processUpstream("_caldav/a.md", { ...fm, _uid: "b", title: "新" }, "", d);
+    await processUpstream("caldav/a.md", { ...fm, _uid: "b", title: "新" }, "", d);
     expect(await cache.getPending(`upd:${T}a.ics`)).toMatchObject({ patch: { summary: "新" } });
     expect(await cache.getPending(`upd:${T}b.ics`)).toBeUndefined();
     expect(writes[0].set).toMatchObject({ _uid: "a" });
@@ -146,14 +146,14 @@ describe("request with writable edits in the same change", () => {
   test("writable values are rolled back, not silently absorbed", async () => {
     const { cache, fm } = await setup();
     const { d, writes } = deps(cache);
-    await processUpstream("_caldav/a.md", { ...fm, title: "順手改", _request: "delete" }, "", d);
+    await processUpstream("caldav/a.md", { ...fm, title: "順手改", _request: "delete" }, "", d);
     expect(writes[0].set).toMatchObject({ title: "原" });
   });
   test("dismiss-conflict removes only a conflict pending", async () => {
     const { cache, o, fm } = await setup();
     await enqueuePatch(cache, o, { summary: "排隊中" }, new Date());
     const { d } = deps(cache);
-    await processUpstream("_caldav/a.md", { ...fm, title: "排隊中", _request: "dismiss-conflict" }, "", d);
+    await processUpstream("caldav/a.md", { ...fm, title: "排隊中", _request: "dismiss-conflict" }, "", d);
     expect(await cache.getPending(`upd:${T}a.ics`)).toBeDefined();
   });
 });
@@ -161,7 +161,7 @@ describe("request with writable edits in the same change", () => {
 describe("I6 follow-up: conflict detection via LiveSync change feed", () => {
   test("pathFromDocId", async () => {
     const { pathFromDocId } = await import("../src/projection/snapshot");
-    expect(pathFromDocId("/_caldav/x1aybrz7.md")).toBe("_caldav/x1aybrz7.md");
+    expect(pathFromDocId("caldav/x1aybrz7.md")).toBe("caldav/x1aybrz7.md");
     expect(pathFromDocId("note.md")).toBeUndefined();
     expect(pathFromDocId("h:2vmpuxrh21vm")).toBeUndefined();
   });
@@ -171,8 +171,8 @@ describe("I4 follow-up: runner must not snapshot a renamed copy", () => {
   test("new path whose uid already has a snapshot elsewhere gets no snapshot", async () => {
     const { cache, fm } = await setup();
     const { d } = deps(cache);
-    await processUpstream("_caldav/我改的名字.md", fm, "", d);
-    expect(await cache.getProjection("_caldav/我改的名字.md")).toBeUndefined();
+    await processUpstream("caldav/我改的名字.md", fm, "", d);
+    expect(await cache.getProjection("caldav/我改的名字.md")).toBeUndefined();
   });
 });
 
@@ -181,18 +181,18 @@ describe("M6-3 Task 1: server-side create from a projection file", () => {
     const { cache } = await setup();
     const { d, calls } = deps(cache);
     const fm = { title: "裝置新建", status: "needs-action", due: "2026-12-01", due_time: "09:30", list: "work", _kind: "VTODO", _uid: "new-1" };
-    await processUpstream("_caldav/nnnnnnnn.md", fm, "", d);
+    await processUpstream("caldav/nnnnnnnn.md", fm, "", d);
     const p = await cache.getPending("new-1");
     expect(p).toMatchObject({ uid: "new-1", collection: W, href: `${W}new-1.ics`, state: "queued" });
     expect((p as { ics: string }).ics).toContain("SUMMARY:裝置新建");
     expect((p as { ics: string }).ics).toContain("DUE;TZID=Asia/Taipei:20261201T093000");
     expect(calls).toContain("sync");
-    expect(await cache.getProjection("_caldav/nnnnnnnn.md")).toBeDefined();
+    expect(await cache.getProjection("caldav/nnnnnnnn.md")).toBeDefined();
   });
   test("unknown list → rejected, nothing queued", async () => {
     const { cache } = await setup();
     const { d, writes } = deps(cache);
-    await processUpstream("_caldav/nnnnnnnn.md", { title: "x", list: "nope", _kind: "VTODO", _uid: "new-2" }, "", d);
+    await processUpstream("caldav/nnnnnnnn.md", { title: "x", list: "nope", _kind: "VTODO", _uid: "new-2" }, "", d);
     expect(await cache.getPending("new-2")).toBeUndefined();
     expect(writes[0].set).toMatchObject({ _sync: "rejected" });
   });
@@ -202,25 +202,25 @@ describe("M6-3 review: create path", () => {
   const newFm = (o: Record<string, unknown> = {}) => ({ title: "裝置新建", status: "needs-action", list: "tasks", _kind: "VTODO", _uid: "new-9", ...o });
   test("C1 reconcile snapshotted the file first → runner still creates", async () => {
     const { cache } = await setup();
-    await cache.putProjection({ path: "_caldav/n.md", uid: "new-9", fm: newFm(), body: "", writtenAt: 0 });
+    await cache.putProjection({ path: "caldav/n.md", uid: "new-9", fm: newFm(), body: "", writtenAt: 0 });
     const { d } = deps(cache);
-    await processUpstream("_caldav/n.md", newFm(), "", d);
+    await processUpstream("caldav/n.md", newFm(), "", d);
     expect(await cache.getPending("new-9")).toMatchObject({ uid: "new-9", state: "queued" });
   });
   test("I1 edit before the object exists updates the queued create instead of 'deleted'", async () => {
     const { cache } = await setup();
     const { d, writes } = deps(cache);
-    await processUpstream("_caldav/n.md", newFm(), "", d);
-    await processUpstream("_caldav/n.md", newFm({ title: "改過的新建" }), "", d);
+    await processUpstream("caldav/n.md", newFm(), "", d);
+    await processUpstream("caldav/n.md", newFm({ title: "改過的新建" }), "", d);
     expect((await cache.getPending("new-9") as { ics: string }).ics).toContain("SUMMARY:改過的新建");
     expect(writes.some((w) => w.set._sync === "rejected")).toBe(false);
   });
   test("I2 after a failed create, editing list retries", async () => {
     const { cache } = await setup();
     const { d } = deps(cache);
-    await processUpstream("_caldav/n.md", newFm({ list: "nope" }), "", d);
+    await processUpstream("caldav/n.md", newFm({ list: "nope" }), "", d);
     expect(await cache.getPending("new-9")).toBeUndefined();
-    await processUpstream("_caldav/n.md", newFm({ list: "work", _sync: "rejected", _sync_msg: "找不到清單：nope" }), "", d);
+    await processUpstream("caldav/n.md", newFm({ list: "work", _sync: "rejected", _sync_msg: "找不到清單：nope" }), "", d);
     expect(await cache.getPending("new-9")).toMatchObject({ collection: W });
   });
 });
@@ -232,5 +232,13 @@ describe("M6-3 e2e: server fallback restore must not race the device's own undo"
     expect(serverRestoreDecision({ existsNow: false, db: "live" })).toBe(false); // LiveSync 會把它寫回來（例如裝置已經改回）
     expect(serverRestoreDecision({ existsNow: false, db: "deleted" })).toBe(true);
     expect(serverRestoreDecision({ existsNow: false, db: "unknown" })).toBe(true);
+  });
+});
+
+describe("projection dir is a plain PKM folder (caldav/)", () => {
+  test("pathFromDocId only matches files directly in caldav/", async () => {
+    const { pathFromDocId } = await import("../src/projection/snapshot");
+    expect(pathFromDocId("caldav/sub/x.md")).toBeUndefined();
+    expect(pathFromDocId("notes/caldav/x.md")).toBeUndefined();
   });
 });

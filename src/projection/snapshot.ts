@@ -1,4 +1,4 @@
-import { WRITABLE_KEYS } from "./types";
+import { PROJ_DIR, WRITABLE_KEYS } from "./types";
 
 const norm = (v: unknown) => (v == null || v === "" ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
 
@@ -53,10 +53,10 @@ export class RecentPaths {
   drain(): string[] { const out = [...this.set]; this.set.clear(); return out; }
 }
 
-/** LiveSync 的文件 id → 投影檔路徑（`_` 開頭的路徑在 CouchDB 會加 `/` 跳脫，S5）；不是投影檔回傳 undefined。 */
+/** LiveSync 的文件 id → 投影檔路徑（`_` 開頭的路徑在 CouchDB 會加 `/` 跳脫，S5）；不是投影檔（直接位於投影目錄的 .md）回傳 undefined。 */
 export function pathFromDocId(id: string): string | undefined {
   const p = id.startsWith("/") ? id.slice(1) : id;
-  return p.startsWith("_caldav/") && p.endsWith(".md") ? p : undefined;
+  return p.startsWith(`${PROJ_DIR}/`) && p.endsWith(".md") && !p.slice(PROJ_DIR.length + 1).includes("/") ? p : undefined;
 }
 
 /**

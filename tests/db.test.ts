@@ -209,11 +209,11 @@ describe("projections store (M6-2)", () => {
   const snap = (path: string) => ({ path, uid: `u-${path}`, fm: { title: "t", _etag: '"1"' }, body: "筆記\n", writtenAt: 1 });
   test("projections round-trip", async () => {
     const s = await open(fresh());
-    await s.putProjection(snap("_caldav/a.md"));
-    expect(await s.getProjection("_caldav/a.md")).toEqual(snap("_caldav/a.md"));
+    await s.putProjection(snap("caldav/a.md"));
+    expect(await s.getProjection("caldav/a.md")).toEqual(snap("caldav/a.md"));
     expect(await s.allProjections()).toHaveLength(1);
-    await s.deleteProjection("_caldav/a.md");
-    expect(await s.getProjection("_caldav/a.md")).toBeUndefined();
+    await s.deleteProjection("caldav/a.md");
+    expect(await s.getProjection("caldav/a.md")).toBeUndefined();
   });
   test("upgrade from v3 keeps objects", async () => {
     const name = fresh();
@@ -233,13 +233,13 @@ describe("projections store (M6-2)", () => {
     });
     const s = await open(name);
     expect((await s.findByShortId("vvvvvvvv")).map((o) => o.href)).toEqual(["/v3.ics"]);
-    await s.putProjection(snap("_caldav/b.md"));
-    expect(await s.getProjection("_caldav/b.md")).toBeDefined();
+    await s.putProjection(snap("caldav/b.md"));
+    expect(await s.getProjection("caldav/b.md")).toBeDefined();
   });
   test("fingerprint change clears projections", async () => {
     const name = fresh();
     const s = await open(name);
-    await s.putProjection(snap("_caldav/a.md"));
+    await s.putProjection(snap("caldav/a.md"));
     s.close();
     const s2 = await open(name, "other|user");
     expect(await s2.allProjections()).toEqual([]);

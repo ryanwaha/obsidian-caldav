@@ -68,7 +68,7 @@ export async function updateLabels(app: App, notePath: string, targetPath: strin
   const note = app.vault.getAbstractFileByPath(notePath);
   const fm = fmOf(app, targetPath);
   if (!(note instanceof TFile) || !fm) return 0;
-  const id = targetPath.replace(/^_caldav\//, "").replace(/\.md$/, "");
+  const id = targetPath.slice(targetPath.lastIndexOf("/") + 1).replace(/\.md$/, "");
   const alias = Array.isArray(fm.aliases) && fm.aliases.length ? String(fm.aliases[0]) : String(fm.title ?? "");
   let n = 0;
   await app.vault.process(note, (t) => t.replace(new RegExp(`\\[\\[${id}(\\|[^\\]]*)?\\]\\]`, "g"), () => { n++; return `[[${id}|${alias}]]`; }));

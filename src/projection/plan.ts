@@ -88,7 +88,7 @@ const KEEP_WHILE_QUEUED = new Set<string>([...WRITABLE_KEYS, "aliases", "_hash"]
 
 const update = (path: string, set: Partial<ProjFm>, unset: string[] = []): ProjAction => ({ op: "update", path, set, unset });
 
-/** 對帳：快取應有的投影 vs `_caldav/` 現有檔案 → 最少的動作（設計 §8）。永不產生刪除檔案的動作（merge-into 的空檔除外）。 */
+/** 對帳：快取應有的投影 vs `caldav/` 現有檔案 → 最少的動作（設計 §8）。永不產生刪除檔案的動作（merge-into 的空檔除外）。 */
 export function planReconcile(input: ReconcileInput): ProjAction[] {
   const out: ProjAction[] = [];
   const inScope = (col: string) => input.whitelist.length === 0 || input.whitelist.includes(col);

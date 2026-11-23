@@ -109,7 +109,7 @@ export class ProjectionGuard {
     return core;
   }
 
-  /** 掃描 `_caldav/` 的 LiveSync 衝突並解決。回傳解決的數量。 */
+  /** 掃描 `caldav/` 的 LiveSync 衝突並解決。回傳解決的數量。 */
   async resolveConflicts(paths?: string[]): Promise<number> {
     const core = this.core();
     const cache = await this.getCache();

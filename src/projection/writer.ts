@@ -13,7 +13,7 @@ export interface ReconcileStats { created: number; updated: number; renamed: num
 /** 讀檔自己解析 frontmatter，不依賴 metadataCache（剛建立或剛改寫的檔案，metadataCache 可能還沒更新）。 */
 const splitFrontmatter = (text: string) => split(text, parseYaml);
 
-/** 伺服器模式：把快取投影到 `_caldav/`（設計 §7.1）。同一時間只跑一輪；進行中又被呼叫，結束後再跑一輪。 */
+/** 伺服器模式：把快取投影到 `caldav/`（設計 §7.1）。同一時間只跑一輪；進行中又被呼叫，結束後再跑一輪。 */
 export class ProjectionWriter {
   private running?: Promise<ReconcileStats>;
   private again = false;

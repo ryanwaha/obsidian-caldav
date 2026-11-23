@@ -22,6 +22,7 @@ import { type Config, SessionManager } from "./session";
 import { CalDavSettingTab, DEFAULT_SETTINGS, SECRET_ID, type Settings } from "./settings";
 import { SyncEngine } from "./sync/engine";
 import { ProjectionWriter } from "./projection/writer";
+import { PROJ_DIR } from "./projection/types";
 import { UpstreamRunner } from "./projection/upstreamRunner";
 import { ProjectionGuard } from "./projection/guard";
 import { chipExtension, chipPostProcessor, chipRefresh } from "./client/render";
@@ -105,7 +106,7 @@ export default class CalDavPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => new ClientGuard(this.app).start((r) => this.registerEvent(r)));
     this.addCommand({ id: "new-task", name: "新建任務並插入參照", editorCallback: (editor) => new ClientNewTaskModal(this.app, editor).open() });
     this.registerEvent(this.app.metadataCache.on("changed", (f) => {
-      if (!f.path.startsWith("_caldav/")) return;
+      if (!f.path.startsWith(`${PROJ_DIR}/`)) return;
       window.clearTimeout(this.chipTimer);
       this.chipTimer = window.setTimeout(() => this.refreshChips(), 300);
     }));
