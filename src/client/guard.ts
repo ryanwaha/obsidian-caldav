@@ -2,7 +2,7 @@ import { type App, type EventRef, Modal, Notice, parseYaml, Setting, TFile } fro
 import { splitFrontmatter } from "../projection/frontmatter";
 import { PROJ_DIR } from "../projection/types";
 import { writeFm } from "./actions";
-import { type ConflictMap, conflictWrites, isLocal, type StorageAccessManager, systemKeysChanged } from "./guardLogic";
+import { type ConflictMap, conflictWrites, isLocal, isLocalDelete, type StorageAccessManager, systemKeysChanged } from "./guardLogic";
 
 const inDir = (p: string) => p.startsWith(`${PROJ_DIR}/`) && p.endsWith(".md") && p.slice(PROJ_DIR.length + 1).indexOf("/") < 0;
 
@@ -68,7 +68,7 @@ export class ClientGuard {
   }
 
   private async onDelete(f: TFile): Promise<void> {
-    if (isLocal(this.sam(), { path: f.path, stat: f.stat }) !== true) return; // LiveSync 帶來的（例如伺服器搬移）不還原
+    if (isLocalDelete(this.sam(), f.path) !== true) return; // LiveSync 帶來的（例如伺服器搬移）不還原
     const text = this.content.get(f.path);
     if (text === undefined) return;
     await this.app.vault.create(f.path, text);
@@ -76,7 +76,7 @@ export class ClientGuard {
   }
 
   private async onRename(f: TFile, old: string): Promise<void> {
-    if (isLocal(this.sam(), { path: f.path, stat: f.stat }) !== true) return;
+    if (!this.sam()) return; // 拿不到 LiveSync 內部 API 時不做本機還原（Global Constraints）；改名事件本身只來自本機（S9）
     if (this.app.vault.getAbstractFileByPath(old)) return;
     await this.app.fileManager.renameFile(f, old);
     new Notice("CalDAV：投影檔的名稱與位置由系統管理，已改回", 6000);

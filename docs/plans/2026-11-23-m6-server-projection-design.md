@@ -241,7 +241,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 
 - 客戶端看到的 `_caldav/` 變化大多來自伺服器：搬移的 rename、`merge-into` 刪掉的空檔、每次 frontmatter 重寫。LiveSync 以路徑為文件 id，伺服器的 rename 傳到其他裝置時很可能是「舊路徑刪除＋新路徑建立」。
 - 失敗情境：客戶端守門看到刪除 → 依 §8.6 立即還原舊檔 → 經 LiveSync 送回伺服器 → 伺服器看到舊 `_uid` 的檔案、搬移目標已有內容 → 標 rejected，形成重複檔與來回拉鋸。
-- **已解（S9）**：可以分辨。LiveSync 的 `storageAccessManager.isFileProcessing(path) || recentlyTouched(file)` 為 true 即為 LiveSync 帶來的變更。客戶端只對兩者皆 false 的刪除／改名（本機使用者動作）即時還原；內部 API 特徵檢查不通過時不做客戶端還原。伺服器兜底回滾必須排除自己的寫入、改名與 `merge-into` 刪除。
+- **已解（S9）**：可以分辨。LiveSync 的 `storageAccessManager.isFileProcessing(path) || recentlyTouched(file)` 為 true 即為 LiveSync 帶來的變更。客戶端即時還原：刪除事件只看 `isFileProcessing(path)`（false＝本機；M6-3 e2e 發現 `recentlyTouched` 對所有「LiveSync 最後寫過」的檔都是 true，不能用來判斷刪除）；改名事件一律是本機動作（遠端改名是刪除＋建立）；內部 API 特徵檢查不通過時不做客戶端還原。伺服器兜底回滾必須排除自己的寫入、改名與 `merge-into` 刪除。
 
 ## 9. 對其他服務與流程的影響
 

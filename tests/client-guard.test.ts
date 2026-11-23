@@ -15,3 +15,11 @@ test("systemKeysChanged", () => {
   expect(systemKeysChanged({ _etag: "1", title: "a" }, { _etag: "2", title: "b" })).toEqual(["_etag"]);
   expect(systemKeysChanged({ title: "a" }, { title: "b" })).toEqual([]);
 });
+
+test("isLocalDelete: only isFileProcessing counts (recentlyTouched is true for any file LiveSync last wrote)", async () => {
+  const { isLocalDelete } = await import("../src/client/guardLogic");
+  const sam = { isFileProcessing: (p: string) => p === "busy", recentlyTouched: () => true };
+  expect(isLocalDelete(sam, "x")).toBe(true);
+  expect(isLocalDelete(sam, "busy")).toBe(false);
+  expect(isLocalDelete(undefined, "x")).toBeUndefined();
+});

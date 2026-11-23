@@ -22,3 +22,12 @@ const norm = (v: unknown) => (v == null || v === "" ? null : typeof v === "objec
 export function systemKeysChanged(prev: Record<string, unknown>, next: Record<string, unknown>): string[] {
   return SYSTEM_KEYS.filter((k) => norm(prev[k]) !== norm(next[k]));
 }
+
+/**
+ * 刪除事件是否為本機動作。不能用 recentlyTouched：凡是 LiveSync 最後寫過、之後沒被本機改過的檔案都會是 true（M6-3 e2e 發現）。
+ * S9：遠端帶來的刪除在事件當下 isFileProcessing 一律為 true。改名事件只會來自本機（遠端改名是刪除＋建立）。
+ */
+export function isLocalDelete(sam: StorageAccessManager | undefined, path: string): boolean | undefined {
+  if (!sam || typeof sam.isFileProcessing !== "function") return undefined;
+  return !sam.isFileProcessing(path);
+}
