@@ -14,6 +14,10 @@ const edits = {
                 async (F) => { await app.vault.process(app.vault.getAbstractFileByPath(F), t => t + 'B 在 body 加的一行\n'); } ],
   fm_diff_fields: [ async (F) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(F), fm => { fm.title = '交週報-A'; }); },
                     async (F) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(F), fm => { fm.due = '2027-01-05T08:00:00'; }); } ],
+  fm_adjacent: [ async (F) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(F), fm => { fm.title = '交週報-A2'; }); },
+                 async (F) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(F), fm => { fm.status = 'in-process'; }); } ],
+  fm_server_meta: [ async (F) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(F), fm => { fm.status = 'needs-action'; }); },
+                    async (F) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(F), fm => { fm._etag = '"e2"'; fm._hash = 'h9f3e00aa11bb22cc'; fm._sync = 'ok'; }); } ],
   fm_same_field: [ async (F) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(F), fm => { fm.status = 'completed'; }); },
                    async (F) => { await app.fileManager.processFrontMatter(app.vault.getAbstractFileByPath(F), fm => { fm.status = 'cancelled'; }); } ],
 }[scenario];

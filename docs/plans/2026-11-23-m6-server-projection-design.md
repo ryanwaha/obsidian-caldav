@@ -228,11 +228,11 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 
 ### 8.7 LiveSync 衝突（S5 後新增）
 
-- frontmatter 對 body、frontmatter 中**不相鄰**的欄位，LiveSync 會自動合併（S5）。**相鄰欄位未測**：§6.2 的可寫欄位彼此相鄰，伺服器每次投影又一定改到 `_etag`／`_hash`／`_sync`，所以 M6-1 開頭要補測「相鄰欄位」與「完整 §6.2 frontmatter（含 `_` 欄位）」兩種情境。
+- frontmatter 對 body、frontmatter 中**不相鄰**的欄位，LiveSync 會自動合併（S5）。相鄰欄位、以及「使用者改可寫欄位＋伺服器改系統欄位」也會自動合併（S8）。
 - 同一行被兩邊改成不同值（使用者改欄位的同時，伺服器因原生客戶端的修改重寫同一欄位）會產生 LiveSync 衝突，對話框可能跳在 headless 伺服器上。
 - 伺服器模式：
   1. 檔案最近 10 s 內收到遠端修改時延後重寫，且先處理完上行再重新投影。
-  2. 偵測 `_caldav/` 檔案的 LiveSync 衝突並以程式解決：frontmatter 取 CalDAV 的值，裝置版本的不同值寫入 `_conflict`（交給 D8 的客戶端對話框），body 不同時串接。**M6-1 開頭先實測 LiveSync 內部 API（`getConflictedDoc`、`tryAutoMerge`）能否做到**；做不到時另議。
+  2. 偵測 `_caldav/` 檔案的 LiveSync 衝突並以程式解決：frontmatter 取 CalDAV 的值，裝置版本的不同值寫入 `_conflict`（交給 D8 的客戶端對話框），body 不同時串接。已實測可行（S7）：`localDatabase.getDBEntry(path,{conflicts:true})` → 組內容 → `databaseFileAccess.storeContent` → `services.conflict.resolveByDeletingRevision`。這些是 LiveSync 內部 API：啟動時檢查方法都存在才啟用，否則停用自動解衝突並 Notice；LiveSync 版本列入凍結清單。
 - 裝置之間（iPhone 對 Windows）的同行衝突是 LiveSync 既有行為，維持由使用者在 LiveSync 對話框處理。
 
 ## 9. 對其他服務與流程的影響

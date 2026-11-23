@@ -160,3 +160,20 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
 
 ### 順帶發現（S8 的前導）
 `processFrontMatter` 往返之後：`due_time: "09:30"` → `due_time: 09:30`（引號消失）；`_hash: 0000000000000001` → `_hash: 1`（被當成數字，前導零遺失）。見 S8。
+
+## S8 相鄰欄位合併、`due_time` 寫入原文 —— ✅ 通過（M6-1 Task 2；Obsidian 1.13.7）
+
+投影檔改用完整 §6.2 格式（含 `_etag`、`_hash`、`_sync` 等），同 S5 的方法：
+
+| 情境 | 結果 |
+|---|---|
+| `fm_adjacent`：A 改 `title`、B 改緊鄰下一行的 `status` | ✅ 自動合併，兩端逐字相同，無對話框，伺服器無 `_conflicts` |
+| `fm_server_meta`：A 改 `status`，B 改 `_etag`＋`_hash`＋`_sync`（模擬伺服器重新投影） | ✅ 同上 |
+
+所以 LiveSync 只有在**同一行**被兩邊改成不同值時才衝突，相鄰行不影響。伺服器重新投影時改系統欄位，不會和使用者改可寫欄位互相衝突。
+
+**`due_time` 與 YAML**
+- `processFrontMatter` 寫入字串 `'09:30'` → 原文 `due_time: 09:30`（不加引號），`metadataCache` 讀回 `"09:30"`（字串）。Obsidian 的 YAML 解析器不會把它當成六十進位數字。
+- 寫入全數字字串 `'0000000000000001'` → 原文自動加引號 `"0000000000000001"`，讀回仍是字串。
+- Properties（型別 text）把 `due_time` 改成 `07:05` → 原文 `due_time: 07:05`，讀回字串 `"07:05"`。Bases 表格用的是同一個 widget（S3），未另外測。
+- S7 看到的 `_hash: 1`，原因是手寫種子檔裡沒加引號的 `0000000000000001` 本來就是 YAML 數字，**不是** `processFrontMatter` 的問題。結論：系統欄位一律透過 `processFrontMatter` 寫入；讀取時以 `String(v)` 正規化。
