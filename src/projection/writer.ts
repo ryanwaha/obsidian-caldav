@@ -83,6 +83,7 @@ export class ProjectionWriter {
       objects, projected,
       tombstones: await cache.allTombstones(), aliases: await cache.allAliases(), collections,
       whitelist: wl, files, now: Date.now(), complete, pending,
+      known: new Set((await cache.allProjections()).map((p) => p.path)),
     });
 
     const canRename = (vault as typeof vault & { getConfig(k: string): unknown }).getConfig("alwaysUpdateLinks") === true;

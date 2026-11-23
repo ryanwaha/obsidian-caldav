@@ -199,6 +199,14 @@ test("conflict-cleared-after-resolution", async () => {
   expect(r).toEqual([{ op: "update", path: "_caldav/aaaaaaaa.md", set: { _sync: "ok" }, unset: ["_conflict"] }]);
 });
 
+test("duplicate-uid-file-marked-rejected", async () => {
+  const a = o("a", "aaaaaaaa");
+  const r = plan(await input([a], [file("_caldav/aaaaaaaa.md", await fmOf(a)), file("_caldav/copy.md", await fmOf(a), false)]));
+  expect(r).toEqual([{ op: "update", path: "_caldav/copy.md", set: { _sync: "rejected", _sync_msg: "重複的投影檔（與 _caldav/aaaaaaaa.md 相同 _uid）" }, unset: [] }]);
+  const k = plan(await input([a], [file("_caldav/aaaaaaaa.md", await fmOf(a)), file("_caldav/0new.md", await fmOf(a))], { known: new Set(["_caldav/aaaaaaaa.md"]) }));
+  expect(k).toEqual([{ op: "update", path: "_caldav/0new.md", set: { _sync: "rejected", _sync_msg: "重複的投影檔（與 _caldav/aaaaaaaa.md 相同 _uid）" }, unset: [] }]);
+});
+
 test("never-delete", () => {
   for (const r of all) for (const a of r) expect(["create", "update", "rename", "merge-into"]).toContain(a.op);
 });

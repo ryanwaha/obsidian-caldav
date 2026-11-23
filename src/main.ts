@@ -23,6 +23,7 @@ import { CalDavSettingTab, DEFAULT_SETTINGS, SECRET_ID, type Settings } from "./
 import { SyncEngine } from "./sync/engine";
 import { ProjectionWriter } from "./projection/writer";
 import { UpstreamRunner } from "./projection/upstreamRunner";
+import { ProjectionGuard } from "./projection/guard";
 import { type CalObject, type CollectionInfo, type Patch, type PendingUpdate, type SyncReport, isUpdate } from "./types";
 
 export default class CalDavPlugin extends Plugin {
@@ -33,6 +34,7 @@ export default class CalDavPlugin extends Plugin {
   });
   private intervalId?: number;
   readonly projection = new ProjectionWriter(this.app, async () => (await this.sessions.get(this.config()).catch(() => undefined))?.cache, () => this.settings.projectCollections);
+  readonly guard = new ProjectionGuard(this.app, async () => (await this.sessions.get(this.config()).catch(() => undefined))?.cache, this.projection);
   private lastReport?: SyncReport;
   readonly index = new MemoryIndex();
   readonly backlinks = new BacklinkIndex();
@@ -46,7 +48,9 @@ export default class CalDavPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.sessions.onReport = (r) => {
       if (this.settings.mode !== "server") return;
-      void this.projection.reconcile(r.errors.length === 0).then((p) => {
+      void this.projection.reconcile(r.errors.length === 0).then(async (p) => {
+        const c = await this.guard.resolveConflicts();
+        if (c) console.info("[obsidian-caldav] 已解決 LiveSync 衝突", c);
         if (p.created || p.updated || p.renamed || p.merged) console.info("[obsidian-caldav] 投影", p);
       });
     };
@@ -70,6 +74,7 @@ export default class CalDavPlugin extends Plugin {
         ProjectionWriter.setPropertyTypes(this.app);
         new UpstreamRunner(this.app, async () => this.sessions.get(this.config()).catch(() => undefined), this.projection, () => void this.syncNow(false, "上行"))
           .start((r) => this.registerEvent(r));
+        this.guard.start((r) => this.registerEvent(r));
       }
       this.resetInterval();
       await this.reloadIndex(); // 先顯示快取（離線也可用），再同步

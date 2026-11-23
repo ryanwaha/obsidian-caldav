@@ -25,6 +25,8 @@ export interface ReconcileInput {
   complete: boolean;
   /** 伺服器上該物件的待送修改（key = objUid），M6-2 三方對帳 */
   pending: Map<string, PendingUpdate>;
+  /** 伺服器有快照的路徑；同一 _uid 有多個檔案時優先保留這些 */
+  known?: Set<string>;
 }
 
 const MSG_FOREIGN = "不是投影檔";
@@ -88,9 +90,17 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
   const byUid = new Map<string, ProjFile>();
   const used = new Set(input.files.map((f) => f.path));
 
-  for (const f of input.files) {
+  const known = input.known ?? new Set<string>();
+  const rank = (f: ProjFile) => (known.has(f.path) ? 0 : 1);
+  for (const f of [...input.files].sort((x, y) => rank(x) - rank(y) || (x.path < y.path ? -1 : x.path > y.path ? 1 : 0))) {
     const uid = f.fm?._uid;
-    if (typeof uid === "string" && uid) { if (!byUid.has(uid)) byUid.set(uid, f); continue; }
+    if (typeof uid === "string" && uid) {
+      const first = byUid.get(uid);
+      if (!first) { byUid.set(uid, f); continue; }
+      const msg = `重複的投影檔（與 ${first.path} 相同 _uid）`;
+      if (f.fm?._sync !== "rejected" || f.fm?._sync_msg !== msg) out.push(update(f.path, { _sync: "rejected", _sync_msg: msg }));
+      continue;
+    }
     if (f.fm?._sync !== "rejected" || f.fm?._sync_msg !== MSG_FOREIGN) out.push(update(f.path, { _sync: "rejected", _sync_msg: MSG_FOREIGN }));
   }
 
