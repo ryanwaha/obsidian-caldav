@@ -10,7 +10,7 @@ const ics = (uid, summary, lines = []) => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PR
 const put = (col, uid, summary, lines) => dav('PUT', `/${col}/${uid}.ics`, ics(uid, summary, lines), { 'Content-Type': 'text/calendar' });
 const { br, page } = await connect('vault-s');
 const ev = (f, a) => page.evaluate(f, a);
-const sync = () => ev(async () => { const p = app.plugins.plugins['obsidian-caldav']; await p.syncNow(false, 'e2e'); await new Promise(r => setTimeout(r, 300)); await p.projection.reconcile(); await new Promise(r => setTimeout(r, 300)); return true; });
+const sync = () => ev(async () => { const p = app.plugins.plugins['obsidian-caldav']; await p.syncNow(false, 'e2e'); await new Promise(r => setTimeout(r, 300)); await p.projection.reconcile(true); await new Promise(r => setTimeout(r, 300)); return true; });
 const setWl = (wl) => ev(async (wl) => { const p = app.plugins.plugins['obsidian-caldav']; p.settings.projectCollections = wl; await p.saveSettings(); }, wl);
 const shortOf = (uid) => ev(async (u) => { const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(u))); let b = 0n; for (let i = 0; i < 5; i++) b = (b << 8n) | BigInt(d[i]); const A = '0123456789abcdefghjkmnpqrstvwxyz'; let o = ''; for (let i = 7; i >= 0; i--) o += A[Number((b >> BigInt(i * 5)) & 31n)]; return o; }, uid);
 const cat = (rel) => existsSync(`${V}/${rel}`) ? readFileSync(`${V}/${rel}`, 'utf8') : '(missing)';
