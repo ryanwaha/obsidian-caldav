@@ -102,4 +102,20 @@ describe("CalDavClient.get", () => {
     expect((await c.get("/a.ics")).status).toBe(404);
     await expect(c.get("/b.ics")).rejects.toBeInstanceOf(HttpError);
   });
+
+  test("move sends MOVE with Destination and Overwrite F", async () => {
+    const { transport, calls } = fakeTransport({ "MOVE /ryanw/tasks/a.ics": { status: 201, headers: {}, text: "" } } as any);
+    const c = new CalDavClient(SERVER, "Basic x", transport);
+    expect(await c.move("/ryanw/tasks/a.ics", "/ryanw/work/a.ics")).toBe(201);
+    expect(calls[0].method).toBe("MOVE");
+    expect(calls[0].headers?.Destination).toBe(SERVER + "/ryanw/work/a.ics");
+    expect(calls[0].headers?.Overwrite).toBe("F");
+  });
+
+  test("delete sends If-Match", async () => {
+    const { transport, calls } = fakeTransport({ "DELETE /ryanw/tasks/a.ics": { status: 204, headers: {}, text: "" } } as any);
+    const c = new CalDavClient(SERVER, "Basic x", transport);
+    expect(await c.delete("/ryanw/tasks/a.ics", '"e1"')).toBe(204);
+    expect(calls[0].headers?.["If-Match"]).toBe('"e1"');
+  });
 });

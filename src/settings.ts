@@ -2,8 +2,14 @@ import { type App, PluginSettingTab, Setting } from "obsidian";
 import type CalDavPlugin from "./main";
 import { normalizeServerUrl } from "./session";
 
-export interface Settings { serverUrl: string; username: string; syncIntervalMinutes: number; defaultCollection: string }
-export const DEFAULT_SETTINGS: Settings = { serverUrl: "", username: "", syncIntervalMinutes: 5, defaultCollection: "" };
+export interface Settings {
+  serverUrl: string; username: string; syncIntervalMinutes: number; defaultCollection: string;
+  /** M6：legacy = 0.5.0 行為（預設）；client = 裝置（只讀寫 caldav/，不連 CalDAV）；server = 投影與上行（只在 headless 伺服器） */
+  mode: "legacy" | "client" | "server";
+  /** 投影的集合 href；空 = 全部 */
+  projectCollections: string[];
+}
+export const DEFAULT_SETTINGS: Settings = { serverUrl: "", username: "", syncIntervalMinutes: 5, defaultCollection: "", mode: "legacy", projectCollections: [] };
 export const SECRET_ID = "obsidian-caldav-password";
 
 export class CalDavSettingTab extends PluginSettingTab {
@@ -42,6 +48,13 @@ export class CalDavSettingTab extends PluginSettingTab {
         for (const c of todoCols) d.addOption(c.href, c.displayName);
         d.setValue(this.plugin.defaultCollectionHref() ?? "").onChange(async (x) => { s.defaultCollection = x; await this.plugin.saveSettings(); });
       });
+
+    containerEl.createEl("h3", { text: "投影（M6）" });
+    new Setting(containerEl).setName("模式").setDesc("改了要重新啟動 Obsidian。server：整個系統只能有一台（headless 伺服器）；client：裝置，不需要 CalDAV 帳密")
+      .addDropdown((d) => d.addOption("legacy", "legacy（0.5.0）").addOption("client", "client（裝置）").addOption("server", "server").setValue(s.mode)
+        .onChange(async (v) => { s.mode = v as Settings["mode"]; await this.plugin.saveSettings(); }));
+    new Setting(containerEl).setName("投影的清單").setDesc("集合 href，逗號分隔；留空 = 全部")
+      .addText((t) => { t.setValue(s.projectCollections.join(", ")); onBlur(t.inputEl, (v) => (s.projectCollections = v.split(",").map((x) => x.trim()).filter(Boolean))); });
 
     containerEl.createEl("h3", { text: "同步狀態" });
     const status = containerEl.createDiv();

@@ -21,6 +21,9 @@ export class SessionManager {
   private current?: { key: string; session: Promise<Session> };
   private inflight?: Promise<SyncReport | undefined>;
 
+  /** 每一輪同步完成後呼叫（包括進行中被要求而補跑的那一輪）。M6 伺服器模式用它觸發投影。 */
+  onReport?: (r: SyncReport) => void;
+
   constructor(private factory: SessionFactory) {}
 
   private static key(cfg: Config) {
@@ -71,6 +74,7 @@ export class SessionManager {
     if (!session) return undefined;
     const report = await session.engine.syncAll();
     if (report.errors.some((e) => e.name && DB_BROKEN.has(e.name))) this.reset();
+    try { this.onReport?.(report); } catch { /* 監聽者的錯誤不影響同步 */ }
     return report;
   }
 

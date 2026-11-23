@@ -1,8 +1,8 @@
-import type { Alias, CalObject, CollectionInfo, PendingCreate, PendingOp, Tombstone } from "../types";
+import type { Alias, CalObject, ProjectionSnap, CollectionInfo, PendingCreate, PendingOp, Tombstone } from "../types";
 
-const VERSION = 3;
+const VERSION = 4;
 /** 衍生快取：換帳號時清空。pending 不在其中（§4.2）。 */
-const CACHE_STORES = ["meta", "collections", "objects", "tombstones", "aliases"] as const;
+const CACHE_STORES = ["meta", "collections", "objects", "tombstones", "aliases", "projections"] as const;
 type StoreName = (typeof CACHE_STORES)[number] | "pending";
 
 function req<T>(r: IDBRequest<T>): Promise<T> {
@@ -38,6 +38,9 @@ export class CacheStore {
       }
       if (e.oldVersion < 3) {
         db.createObjectStore("aliases", { keyPath: "fromUid" }).createIndex("fromShortId", "fromShortId");
+      }
+      if (e.oldVersion < 4) {
+        db.createObjectStore("projections", { keyPath: "path" }).createIndex("uid", "uid");
       }
     };
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -148,6 +151,30 @@ export class CacheStore {
     for (const a of as) tx.objectStore("aliases").put(a);
     await done(tx);
   }
+
+  /** 同一物件換了 href（MOVE）：刪舊加新，不產生 tombstone。 */
+  async replaceObject(oldHref: string, obj: CalObject): Promise<void> {
+    const tx = this.db.transaction("objects", "readwrite");
+    tx.objectStore("objects").delete(oldHref);
+    tx.objectStore("objects").put(obj);
+    await done(tx);
+  }
+
+  async getProjection(path: string): Promise<ProjectionSnap | undefined> {
+    return (await req(this.db.transaction("projections").objectStore("projections").get(path))) as ProjectionSnap | undefined;
+  }
+  async putProjection(s: ProjectionSnap): Promise<void> {
+    const tx = this.db.transaction("projections", "readwrite");
+    tx.objectStore("projections").put(s);
+    await done(tx);
+  }
+  async deleteProjection(path: string): Promise<void> {
+    const tx = this.db.transaction("projections", "readwrite");
+    tx.objectStore("projections").delete(path);
+    await done(tx);
+  }
+  allProjections(): Promise<ProjectionSnap[]> { return this.readAll("projections"); }
+  projectionsByUid(uid: string): Promise<ProjectionSnap[]> { return this.readAll("projections", "uid", uid); }
 
   count(): Promise<number> { return req(this.db.transaction("objects").objectStore("objects").count()); }
   close(): void { this.db.close(); }

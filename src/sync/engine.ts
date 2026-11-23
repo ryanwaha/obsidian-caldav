@@ -16,7 +16,7 @@ export class SyncEngine {
   private running?: Promise<SyncReport>;
   private last?: SyncReport;
 
-  constructor(private client: CalDavClient, private cache: CacheStore, private now: () => number = Date.now) {}
+  constructor(readonly client: CalDavClient, private cache: CacheStore, private now: () => number = Date.now) {}
 
   get lastReport(): SyncReport | undefined { return this.last; }
 
@@ -159,7 +159,7 @@ export class SyncEngine {
     const patched = (ics: string): string | Error => {
       try { return applyPatch(ics, p.patch, new Date(this.now())); } catch (e) { return e instanceof Error ? e : new Error(String(e)); }
     };
-    const FIELD = { summary: "summary", done: "status", date: "date" } as const;
+    const FIELD = { summary: "summary", done: "status", date: "date", status: "status", end: "end" } as const;
     try {
       let baseIcs = p.baseIcs;
       if (p.baseEtag) {

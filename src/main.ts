@@ -21,6 +21,13 @@ import { requestUrlTransport } from "./caldav/requestUrlTransport";
 import { type Config, SessionManager } from "./session";
 import { CalDavSettingTab, DEFAULT_SETTINGS, SECRET_ID, type Settings } from "./settings";
 import { SyncEngine } from "./sync/engine";
+import { ProjectionWriter } from "./projection/writer";
+import { PROJ_DIR } from "./projection/types";
+import { UpstreamRunner } from "./projection/upstreamRunner";
+import { ProjectionGuard } from "./projection/guard";
+import { chipExtension, chipPostProcessor, chipRefresh } from "./client/render";
+import { ClientGuard } from "./client/guard";
+import { ClientNewTaskModal } from "./client/newTask";
 import { type CalObject, type CollectionInfo, type Patch, type PendingUpdate, type SyncReport, isUpdate } from "./types";
 
 export default class CalDavPlugin extends Plugin {
@@ -30,6 +37,8 @@ export default class CalDavPlugin extends Plugin {
     return { cache, engine: new SyncEngine(new CalDavClient(cfg.serverUrl, basicAuth(cfg.username, cfg.password), requestUrlTransport()), cache) };
   });
   private intervalId?: number;
+  readonly projection = new ProjectionWriter(this.app, async () => (await this.sessions.get(this.config()).catch(() => undefined))?.cache, () => this.settings.projectCollections);
+  readonly guard = new ProjectionGuard(this.app, async () => (await this.sessions.get(this.config()).catch(() => undefined))?.cache, this.projection);
   private lastReport?: SyncReport;
   readonly index = new MemoryIndex();
   readonly backlinks = new BacklinkIndex();
@@ -41,7 +50,16 @@ export default class CalDavPlugin extends Plugin {
 
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.sessions.onReport = (r) => {
+      if (this.settings.mode !== "server") return;
+      void this.projection.reconcile(r.errors.length === 0).then(async (p) => {
+        const c = await this.guard.resolveConflicts();
+        if (c) console.info("[obsidian-caldav] 已解決 LiveSync 衝突", c);
+        if (p.created || p.updated || p.renamed || p.merged) console.info("[obsidian-caldav] 投影", p);
+      });
+    };
     this.addSettingTab(new CalDavSettingTab(this.app, this));
+    if (this.settings.mode === "client") { this.loadClient(); return; }
     this.addCommand({ id: "sync-now", name: "立即同步", callback: () => void this.syncNow(true) });
     this.addCommand({ id: "insert-ref", name: "插入任務／事件參照", editorCallback: (editor) => this.insertRef(editor) });
     this.addCommand({ id: "new-task", name: "新建任務並插入參照", editorCallback: (editor, ctx) => this.newTask(editor, ctx) });
@@ -57,6 +75,14 @@ export default class CalDavPlugin extends Plugin {
     this.registerDomEvent(document, "resume" as keyof DocumentEventMap, () => this.foregroundSync("resume"));
     this.registerEvent(this.app.workspace.on("file-open", () => this.foregroundSync("file-open")));
     this.app.workspace.onLayoutReady(async () => {
+      if (this.settings.mode === "server") {
+        ProjectionWriter.setPropertyTypes(this.app);
+        const runner = new UpstreamRunner(this.app, async () => this.sessions.get(this.config()).catch(() => undefined), this.projection, () => void this.syncNow(false, "上行"));
+        runner.start((r) => this.registerEvent(r));
+        this.projection.onDirty = (p) => runner.schedule(p);
+        this.guard.start((r) => this.registerEvent(r));
+        this.register(() => this.guard.stop());
+      }
       this.resetInterval();
       await this.reloadIndex(); // 先顯示快取（離線也可用），再同步
       this.watchVault();
@@ -68,6 +94,32 @@ export default class CalDavPlugin extends Plugin {
         if (d !== day) { day = d; this.index.touch(); }
       }, 60_000));
       void this.syncNow(false, "啟動");
+    });
+  }
+
+  /** M6 裝置模式：不建立 CalDAV session、不同步；只註冊投影檔的 chip、守門與指令（M6-3）。 */
+  private chipVersion = 0;
+  private chipTimer?: number;
+  private loadClient(): void {
+    this.registerEditorExtension(chipExtension(this.app, () => this.chipVersion));
+    this.registerMarkdownPostProcessor(chipPostProcessor(this.app));
+    this.app.workspace.onLayoutReady(() => new ClientGuard(this.app).start((r) => this.registerEvent(r)));
+    this.addCommand({ id: "new-task", name: "新建任務並插入參照", editorCallback: (editor) => new ClientNewTaskModal(this.app, editor).open() });
+    this.registerEvent(this.app.metadataCache.on("changed", (f) => {
+      if (!f.path.startsWith(`${PROJ_DIR}/`)) return;
+      window.clearTimeout(this.chipTimer);
+      this.chipTimer = window.setTimeout(() => this.refreshChips(), 300);
+    }));
+  }
+
+  private refreshChips(): void {
+    this.chipVersion++;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView)) return;
+      const cm = (view.editor as unknown as { cm?: EditorView }).cm;
+      cm?.dispatch({ effects: chipRefresh.of(null) });
+      if (view.getMode() === "preview") view.previewMode.rerender(true);
     });
   }
 

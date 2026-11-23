@@ -61,6 +61,20 @@ export class CalDavClient {
     return etag === undefined ? { status: res.status } : { status: res.status, etag };
   }
 
+  /** WebDAV MOVE（設計 §8.4，S4）：UID 與 ETag 保留；`Overwrite: F` 目的地已存在時 412。回傳狀態碼。 */
+  async move(href: string, destHref: string): Promise<number> {
+    const res = await this.transport({ method: "MOVE", url: this.base + href, headers: { Authorization: this.auth, Destination: this.base + destHref, Overwrite: "F" } });
+    if (res.status === 401) throw new HttpError(401, "帳號或密碼錯誤");
+    return res.status;
+  }
+
+  /** 刪除物件（`_request: delete`）；以 If-Match 保證刪的是使用者看到的版本。回傳狀態碼。 */
+  async delete(href: string, etag: string): Promise<number> {
+    const res = await this.transport({ method: "DELETE", url: this.base + href, headers: { Authorization: this.auth, "If-Match": etag } });
+    if (res.status === 401) throw new HttpError(401, "帳號或密碼錯誤");
+    return res.status;
+  }
+
   /** 不使用 /.well-known/caldav：iOS 跟隨 301 時會丟掉 Authorization（T5）。 */
   async discover(): Promise<{ principal: string; home: string }> {
     let res = await this.xmlRequest("PROPFIND", "/", "0", propfindBody(["d:current-user-principal"]));
