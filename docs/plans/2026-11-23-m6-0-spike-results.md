@@ -113,3 +113,28 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
   - `due_time`（型別 `text`，`HH:mm`）：有時間才有值。沒有 `due_time` 就是全天（`VALUE=DATE`），有就是 `TZID=Asia/Taipei` 的定時。
   - VEVENT 的 `start`／`end` 同理拆成 `start`、`start_time`、`end`、`end_time`。
   - 客戶端與伺服器模式啟動時，以 `app.metadataTypeManager.setType` 設定這些欄位的型別（每台裝置各自需要，因為 `types.json` 不同步）。
+
+## S5 LiveSync 同時修改同一檔案 —— ⚠️ 部分通過
+
+**環境**：spike 實例裡兩個 vault（`vault-a`、`vault-b`），LiveSync 0.25.56 接專用資料庫 `m6-spike`（`markdowns` 的 `update_seq` 全程維持 149525，未被觸及）。合併相關設定照正式伺服器 vault：`disableMarkdownAutoMerge: false`（自動合併開）、`resolveConflictsByNewerFile: false`、`writeDocumentsIfConflicted: false`、`showMergeDialogOnlyOnActive: false`、不加密。
+
+**方法**：兩邊 `closeReplication()` 暫停 → 各自修改同一個 `_caldav/k3f9x2qa.md` → 兩邊 `openReplication()` 恢復 → 等 30 s，比對兩邊檔案並查 CouchDB 的 `?conflicts=true`。
+
+| 情境 | 結果 |
+|---|---|
+| A 改 frontmatter（`status`），B 在 body 加一行 | ✅ 自動合併，兩邊逐字相同且包含兩邊的修改；無對話框；伺服器上的 `_conflicts` 數秒後自動清除 |
+| A 改 `title`，B 改 `due`（不同欄位，中間隔一行） | ✅ 同上 |
+| A、B 把 `status` 改成不同值（同一行） | ❌ 無法自動合併：A 跳出 LiveSync 的「Conflicting changes」對話框（逐字 diff，畫面上兩個值混成 `cancellompleted`，選項 Use Base／Use Conflicted／Concat both／Not now）；B 沒有對話框；**兩邊檔案不一致**，伺服器保留衝突版本 |
+
+**觀察**
+- LiveSync 對 CouchDB 保留的 `_` 前綴會跳脫：`_caldav/x.md` 的文件 id 是 `/_caldav/x.md`。目錄名 `_caldav/` 可用。
+- 設計 §10 擔心的「使用者寫 body、伺服器改 frontmatter」**不會造成衝突**，這是最常見的情況。
+- 會衝突的只有「同一行被兩邊改成不同值」。在 M6 裡這代表：使用者在裝置上改某欄位的同時（LiveSync 延遲約數秒內），伺服器因為原生客戶端的修改而重寫同一欄位。機率低，但**發生時對話框可能跳在 headless 伺服器上，沒人能按**，衝突就一直卡著。
+- LiveSync 有內部方法 `getConflictedDoc`、`tryAutoMerge`（`services.database._localDatabase`），沒有公開、穩定的「以指定內容解衝突」API。
+
+**建議（待 M6-1 定案）**
+1. **縮小窗口**：伺服器在檔案最近 N 秒內收到遠端修改時延後重寫（N 取 LiveSync 延遲上限，建議 10 s），並且先處理完上行再重新投影。
+2. **伺服器端不得留下卡住的衝突**：伺服器模式偵測 `_caldav/` 檔案的 LiveSync 衝突，以程式解決：frontmatter 取伺服器（CalDAV）的值，裝置那一版的不同值寫進 `_conflict` 交給客戶端的 M6 衝突對話框（D8），body 兩邊不同時串接。M6-1 需要先做一個小實測：確認 LiveSync 內部 API 能否做到，以及跨版本的穩定性；做不到時的退路是伺服器的 LiveSync 對 `_caldav/` 以外不變、但改用「新檔案勝出」只針對 `_caldav/`（需確認 LiveSync 有沒有路徑層級的設定）。
+3. 裝置之間（iPhone 對 Windows）同一行的衝突是 LiveSync 本來就有的行為，不是 M6 新增的，維持由使用者在 LiveSync 對話框解決。
+
+**👤 待使用者提供（Review Focus 3）**：iPhone 與 Windows 上 LiveSync 的這三個設定值：`disableMarkdownAutoMerge`、`resolveConflictsByNewerFile`、`writeDocumentsIfConflicted`（設定畫面的「Conflict resolution」一節）。正式伺服器 vault 為 false／false／false。
