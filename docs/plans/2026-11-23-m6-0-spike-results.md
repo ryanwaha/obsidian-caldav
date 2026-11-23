@@ -67,3 +67,19 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
 3. 點連結文字照常開啟投影檔。
 4. 游標移進連結時，原文展開，chip 不跳位。
 5. 閱讀模式同樣有 chip。
+
+## S2 `[[` 自動完成插入的格式 —— ✅ 通過（桌面 app 1.15.1）
+
+以真實鍵盤在 Live Preview 輸入 `[[` + 查詢字串（中文用 `insertText`），從建議清單按 Enter 選取：
+
+| 查詢 | 建議清單 | 插入結果 |
+|---|---|---|
+| `交週` | `交週報` `_caldav/k3f9x2qa`（只有 alias 那一項） | `[[k3f9x2qa\|交週報]]` |
+| `繳費` | `繳費：電費 \| 十一月 #帳單` `_caldav/k3f9x2qb` | `[[k3f9x2qb\|繳費：電費 \| 十一月 #帳單]]` |
+
+- 設定：`useMarkdownLinks: false`、`newLinkFormat: "shortest"`。D3 的「快照標籤由自動完成自然產生」成立。
+- **特殊字元（Review Focus 5）**：alias 原樣插入，不跳脫。
+  - `|`：只有第一個 `|` 分隔目標與標籤；`metadataCache` 的 `link` 為 `k3f9x2qb`，`displayText` 為完整標籤；閱讀模式解析正確。✅
+  - `#`：Live Preview 會把標籤裡的 `#帳單` 上色成 hashtag，但 `metadataCache` 的 `tags` 為空，**不會變成筆記標籤**。只影響外觀。
+  - `：` 等全形字元無影響。
+- **對設計的影響**：投影時 alias 不需要清理字元。S1 的判斷規則（目標 = 第一個不含 `link-alias` 的 `hmd-internal-link` 節點）在標籤含 hashtag 節點時仍正確。

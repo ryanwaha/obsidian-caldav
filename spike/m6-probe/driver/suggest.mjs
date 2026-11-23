@@ -1,0 +1,24 @@
+import { chromium } from 'playwright-core';
+const [outDir, query, pickText] = process.argv.slice(2);
+const br = await chromium.connectOverCDP('http://127.0.0.1:9223');
+const page = (await Promise.all(br.contexts().flatMap(c => c.pages()).map(async p => [p, await p.evaluate(() => window.app?.vault?.getName?.()).catch(() => null)]))).find(([, n]) => n === 'vault-a')[0];
+await page.evaluate(async () => {
+  const leaf = app.workspace.getLeaf(false);
+  await leaf.openFile(app.vault.getAbstractFileByPath('note.md'), { state: { mode: 'source', source: false } });
+  const ed = leaf.view.editor; ed.replaceRange('\n', { line: ed.lastLine(), ch: ed.getLine(ed.lastLine()).length });
+  ed.setCursor({ line: ed.lastLine(), ch: 0 }); ed.focus();
+});
+await page.waitForTimeout(400);
+await page.keyboard.type('[[');
+await page.keyboard.insertText(query);
+await page.waitForTimeout(800);
+const items = await page.locator('.suggestion-container .suggestion-item').allTextContents();
+console.log('items:', JSON.stringify(items));
+await page.screenshot({ path: `${outDir}/s2-${pickText.slice(0, 2)}.png` });
+const idx = items.findIndex(t => t.includes(pickText));
+console.log('pick index', idx);
+for (let i = 0; i < idx; i++) await page.keyboard.press('ArrowDown');
+await page.keyboard.press('Enter');
+await page.waitForTimeout(400);
+console.log('line:', JSON.stringify(await page.evaluate(() => { const ed = app.workspace.getMostRecentLeaf().view.editor; return ed.getLine(ed.getCursor().line); })));
+await br.close();
