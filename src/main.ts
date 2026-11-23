@@ -25,6 +25,7 @@ import { ProjectionWriter } from "./projection/writer";
 import { UpstreamRunner } from "./projection/upstreamRunner";
 import { ProjectionGuard } from "./projection/guard";
 import { chipExtension, chipPostProcessor, chipRefresh } from "./client/render";
+import { ClientGuard } from "./client/guard";
 import { type CalObject, type CollectionInfo, type Patch, type PendingUpdate, type SyncReport, isUpdate } from "./types";
 
 export default class CalDavPlugin extends Plugin {
@@ -100,6 +101,7 @@ export default class CalDavPlugin extends Plugin {
   private loadClient(): void {
     this.registerEditorExtension(chipExtension(this.app, () => this.chipVersion));
     this.registerMarkdownPostProcessor(chipPostProcessor(this.app));
+    this.app.workspace.onLayoutReady(() => new ClientGuard(this.app).start((r) => this.registerEvent(r)));
     this.registerEvent(this.app.metadataCache.on("changed", (f) => {
       if (!f.path.startsWith("_caldav/")) return;
       window.clearTimeout(this.chipTimer);
