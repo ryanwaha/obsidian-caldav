@@ -1,12 +1,14 @@
 import { type App, type EventRef, Notice, parseYaml, stringifyYaml, TFile } from "obsidian";
 import type { CacheStore } from "../cache/db";
 import { mergeConflictVersions } from "./conflicts";
+import { chooseRestore, pathFromDocId, RecentPaths } from "./snapshot";
 import { newFileContent, splitFrontmatter } from "./frontmatter";
 import { PROJ_DIR } from "./types";
 import type { ProjectionWriter } from "./writer";
 
+type ChangesFeed = { on(ev: "change", cb: (c: { id: string }) => void): ChangesFeed; cancel(): void };
 type LiveSyncCore = {
-  localDatabase?: { getDBEntry?: (...a: unknown[]) => Promise<unknown> };
+  localDatabase?: { getDBEntry?: (...a: unknown[]) => Promise<unknown>; localDatabase?: { changes?: (o: object) => ChangesFeed } };
   databaseFileAccess?: { storeContent?: (path: string, content: string) => Promise<boolean> };
   services?: { conflict?: { resolveByDeletingRevision?: (path: string, rev: string, title: string) => Promise<unknown> } };
 };
@@ -17,9 +19,24 @@ const inDir = (p: string) => p.startsWith(`${PROJ_DIR}/`) && p.endsWith(".md") &
 /** 伺服器模式：投影檔被刪除／改名時還原（§8.6 兜底），LiveSync 衝突以程式解決（§8.7，S7）。 */
 export class ProjectionGuard {
   private warned = false;
+  private recent = new RecentPaths();
+  private sweepCounter = 0;
+  private feed?: ChangesFeed;
+
+  /** 訂閱 LiveSync 本機資料庫的變更：遠端帶來的衝突不一定會寫檔，只看寫檔事件會漏（e2e 步驟 9） */
+  private follow(core: LiveSyncCore): void {
+    if (this.feed) return;
+    const changes = core.localDatabase?.localDatabase?.changes;
+    if (typeof changes !== "function") return;
+    this.feed = changes.call(core.localDatabase!.localDatabase, { since: "now", live: true, style: "all_docs" })
+      .on("change", (c) => { const p = pathFromDocId(c.id); if (p) this.recent.add(p); });
+  }
+  stop(): void { this.feed?.cancel(); this.feed = undefined; }
   constructor(private app: App, private getCache: () => Promise<CacheStore | undefined>, private writer: ProjectionWriter) {}
 
   start(register: (r: EventRef) => void): void {
+    register(this.app.vault.on("modify", (f) => { if (f instanceof TFile && inDir(f.path)) this.recent.add(f.path); }));
+    register(this.app.vault.on("create", (f) => { if (f instanceof TFile && inDir(f.path)) this.recent.add(f.path); }));
     register(this.app.vault.on("delete", (f) => { if (f instanceof TFile && inDir(f.path)) void this.restoreDeleted(f.path); }));
     register(this.app.vault.on("rename", (f, old) => { if (f instanceof TFile && inDir(old)) void this.undoRename(f, old); }));
   }
@@ -29,9 +46,30 @@ export class ProjectionGuard {
     const cache = await this.getCache();
     const snap = await cache?.getProjection(path);
     if (!snap) { console.warn("[obsidian-caldav] 投影檔被刪除，但沒有快照可還原", path); return; }
-    await new Promise((r) => window.setTimeout(r, 500));
+    await new Promise((r) => window.setTimeout(r, 1500)); // 遠端改名是刪除＋建立（S9），等建立那一半也到
     if (this.app.vault.getAbstractFileByPath(path)) return;
+    const snaps = new Set((await cache!.allProjections()).map((s) => s.path));
+    const others: { path: string; uid: string; hasSnap: boolean }[] = [];
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (!inDir(f.path) || f.path === path) continue;
+      const uid = splitFrontmatter(await this.app.vault.cachedRead(f), parseYaml).fm?._uid;
+      if (uid === snap.uid) others.push({ path: f.path, uid, hasSnap: snaps.has(f.path) });
+    }
+    const c = chooseRestore(snap.uid, others);
+    if (c.kind === "skip") return;
     this.writer.markOwn(path);
+    if (c.kind === "rename-back") {
+      const from = this.app.vault.getAbstractFileByPath(c.from);
+      if (from instanceof TFile) {
+        this.writer.markOwn(c.from);
+        await this.app.fileManager.renameFile(from, path);
+        // 改名保留 mtime 與 size，LiveSync 會以「路徑＋mtime＋size」把它當成自己剛寫的檔而不上傳（S9）；重寫一次讓 mtime 改變
+        const back = this.app.vault.getAbstractFileByPath(path);
+        if (back instanceof TFile) await this.app.vault.modify(back, await this.app.vault.read(back));
+      }
+      console.info("[obsidian-caldav] 投影檔被改名，已改回", c.from, "→", path);
+      return;
+    }
     await this.app.vault.create(path, newFileContent(snap.fm, (o) => stringifyYaml(o)) + snap.body);
     console.info("[obsidian-caldav] 已還原被刪除的投影檔", path);
   }
@@ -61,7 +99,10 @@ export class ProjectionGuard {
     const core = this.core();
     const cache = await this.getCache();
     if (!core || !cache) return 0;
-    const list = paths ?? this.app.vault.getMarkdownFiles().map((f) => f.path).filter(inDir);
+    this.follow(core);
+    // 平常只看最近被寫入的檔（review I6）；每 12 輪做一次全掃，補抓沒有寫檔事件的衝突
+    const full = ++this.sweepCounter % 12 === 1;
+    const list = paths ?? (full ? this.app.vault.getMarkdownFiles().map((f) => f.path).filter(inDir) : this.recent.drain());
     const text = (d: DbEntry) => (Array.isArray(d.data) ? d.data.join("") : d.data);
     let n = 0;
     for (const path of list) {
@@ -75,8 +116,8 @@ export class ProjectionGuard {
         const a = splitFrontmatter(text(doc), parseYaml), b = splitFrontmatter(text(other), parseYaml);
         const merged = mergeConflictVersions(snap.fm, a, b);
         const content = newFileContent(merged.fm, (o) => stringifyYaml(o)) + merged.body;
-        await cache.putProjection({ ...snap, fm: merged.fm, body: merged.body, writtenAt: Date.now() });
         if (!(await core.databaseFileAccess!.storeContent!(path, content))) continue;
+        await cache.putProjection({ ...snap, fm: merged.fm, body: merged.body, writtenAt: Date.now() });
         await core.services!.conflict!.resolveByDeletingRevision!(path, rev, "obsidian-caldav");
         n++;
       } catch (e) {

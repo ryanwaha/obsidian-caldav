@@ -82,6 +82,22 @@ if (step === '10') {
   await until('25:00 rejected & rolled back', async () => { const x = devRead(t); return line(x, 'due_time') === '(none)' && x.includes('_sync: rejected'); });
   log('msg', line(devRead(t), '_sync_msg')); log('Radicale DUE', line(await get('m6-e2e', 'e-t'), 'DUE'));
 }
+if (step === '12') {
+  log('put e-m', (await dav('PUT', '/m6-e2e/e-m.ics', ics('e-m', '一起改', ['STATUS:NEEDS-ACTION']), { 'Content-Type': 'text/calendar' })).status);
+  await srvSync(); const M = `_caldav/${await sid('e-m')}.md`; await until('device has e-m', () => devRead(M).includes('一起改'));
+  await devFm(M, "fm.title = '改名又搬家'; fm.list = 'm6-e2e2'"); await afterEdit(); await srvSync(); await srvSync();
+  await until('title + list both applied on server', async () => (await get('m6-e2e2', 'e-m')).includes('SUMMARY:改名又搬家'));
+  await until('device shows both, ok', async () => { const t = devRead(M); return t.includes('改名又搬家') && t.includes('list: m6-e2e2') && t.includes('_sync: ok'); });
+}
+if (step === '13') {
+  log('put e-n', (await dav('PUT', `/m6-e2e/${process.env.NUID ?? 'e-n'}.ics`, ics(process.env.NUID ?? 'e-n', '改名測試', ['STATUS:NEEDS-ACTION']), { 'Content-Type': 'text/calendar' })).status);
+  await srvSync(); const N = `_caldav/${await sid(process.env.NUID ?? 'e-n')}.md`; await until('device has e-n', () => devRead(N).includes('改名測試'));
+  await D.page.evaluate(async (p) => { await app.vault.process(app.vault.getAbstractFileByPath(p), t => t + 'n 的筆記\n'); }, N);
+  await new Promise(r => setTimeout(r, 3000));
+  await D.page.evaluate(async (p) => { await app.fileManager.renameFile(app.vault.getAbstractFileByPath(p), '_caldav/我改的名字.md'); }, N);
+  await new Promise(r => setTimeout(r, 8000));
+  await until('original path back on device, body kept, no stray copy', async () => devRead(N).includes('n 的筆記') && devRead('_caldav/我改的名字.md') === '(missing)');
+}
 if (step === '11') {
   for (const P of [S, D]) await P.page.evaluate(() => { window.__m = 0; app.vault.on('modify', f => { if (f.path.startsWith('_caldav/')) window.__m++; }); });
   await srvSync(); await new Promise(r => setTimeout(r, 6000)); await srvSync(); await new Promise(r => setTimeout(r, 4000));

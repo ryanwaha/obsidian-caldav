@@ -152,6 +152,14 @@ export class CacheStore {
     await done(tx);
   }
 
+  /** 同一物件換了 href（MOVE）：刪舊加新，不產生 tombstone。 */
+  async replaceObject(oldHref: string, obj: CalObject): Promise<void> {
+    const tx = this.db.transaction("objects", "readwrite");
+    tx.objectStore("objects").delete(oldHref);
+    tx.objectStore("objects").put(obj);
+    await done(tx);
+  }
+
   async getProjection(path: string): Promise<ProjectionSnap | undefined> {
     return (await req(this.db.transaction("projections").objectStore("projections").get(path))) as ProjectionSnap | undefined;
   }
@@ -166,6 +174,7 @@ export class CacheStore {
     await done(tx);
   }
   allProjections(): Promise<ProjectionSnap[]> { return this.readAll("projections"); }
+  projectionsByUid(uid: string): Promise<ProjectionSnap[]> { return this.readAll("projections", "uid", uid); }
 
   count(): Promise<number> { return req(this.db.transaction("objects").objectStore("objects").count()); }
   close(): void { this.db.close(); }

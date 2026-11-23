@@ -72,9 +72,11 @@ export default class CalDavPlugin extends Plugin {
     this.app.workspace.onLayoutReady(async () => {
       if (this.settings.mode === "server") {
         ProjectionWriter.setPropertyTypes(this.app);
-        new UpstreamRunner(this.app, async () => this.sessions.get(this.config()).catch(() => undefined), this.projection, () => void this.syncNow(false, "上行"))
-          .start((r) => this.registerEvent(r));
+        const runner = new UpstreamRunner(this.app, async () => this.sessions.get(this.config()).catch(() => undefined), this.projection, () => void this.syncNow(false, "上行"));
+        runner.start((r) => this.registerEvent(r));
+        this.projection.onDirty = (p) => runner.schedule(p);
         this.guard.start((r) => this.registerEvent(r));
+        this.register(() => this.guard.stop());
       }
       this.resetInterval();
       await this.reloadIndex(); // 先顯示快取（離線也可用），再同步
