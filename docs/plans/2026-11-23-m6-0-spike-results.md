@@ -145,3 +145,18 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
 - CouchDB：`DELETE /m6-spike` → `{"ok":true}`；`_all_dbs` → `["_replicator","_users","markdowns"]`。
 - Radicale：`DELETE /ryanw/m6-spike/` → 200；PROPFIND `/ryanw/` 只剩 `tasks/`、`test/`；`test` 裡 `m6-spike` 開頭的物件數 0。
 - 正式實例：`~/.config/obsidian/obsidian.json` 只有主 vault（`updateDisabled: true`，即 1.13.7 凍結的來源）；`obsidian.service` active。
+
+## S7 以程式解決 LiveSync 衝突 —— ✅ 通過（M6-1 Task 1；Obsidian 1.13.7、LiveSync 0.25.56）
+
+- 環境：`spike/m6-probe/setup-livesync.sh` 重建兩個 vault + `m6-spike` 資料庫；`s5.mjs fm_same_field` 製造衝突（A：`status: completed`，B：`status: cancelled`）→ CouchDB `_conflicts: ["2-7e80…"]`。這次兩端都**沒有**跳出對話框（衝突靜靜留著，兩邊檔案不一致）。
+- 呼叫序列（取自 LiveSync 自己「Concat both」按鈕的路徑，`driver/s7.mjs`），在 B 端（模擬 headless 伺服器）執行：
+  1. `doc = core.localDatabase.getDBEntry(path, { conflicts: true }, false, true, true)` → `doc._conflicts` 是落敗版本清單；`data` 可能是字串或字串陣列（要 `join("")`）。
+  2. `other = core.localDatabase.getDBEntry(path, { rev }, false, true, true)` 讀另一版。
+  3. 依策略組出最終內容（本測：`status` 取 `completed`，其餘取目前版）。
+  4. `core.databaseFileAccess.storeContent(path, content)` → `true`。
+  5. `core.services.conflict.resolveByDeletingRevision(path, rev, "m6-server")` → `Symbol(auto_merged)`。
+- 30 s 後：兩端檔案**逐字相同**、`status` 都是 `completed`；CouchDB `?conflicts=true` 無 `_conflicts`（rev 4-…）；兩端都沒有對話框。
+- 這些都是 LiveSync 的**內部** API（`core.localDatabase`、`core.databaseFileAccess`、`core.services.conflict`），LiveSync 升級時可能變動。M6-2 實作要：啟動時做特徵檢查（方法都存在才啟用自動解衝突，否則 Notice 並停用自動解衝突，交回 LiveSync 對話框），並把 LiveSync 版本列入 `infrastructure/obsidian-versions.md` 的凍結清單。
+
+### 順帶發現（S8 的前導）
+`processFrontMatter` 往返之後：`due_time: "09:30"` → `due_time: 09:30`（引號消失）；`_hash: 0000000000000001` → `_hash: 1`（被當成數字，前導零遺失）。見 S8。
