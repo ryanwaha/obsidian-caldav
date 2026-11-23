@@ -177,3 +177,22 @@ spike 實例用的是同一個安裝檔（Electron 外殼 1.13.7），但 Obsidi
 - 寫入全數字字串 `'0000000000000001'` → 原文自動加引號 `"0000000000000001"`，讀回仍是字串。
 - Properties（型別 text）把 `due_time` 改成 `07:05` → 原文 `due_time: 07:05`，讀回字串 `"07:05"`。Bases 表格用的是同一個 widget（S3），未另外測。
 - S7 看到的 `_hash: 1`，原因是手寫種子檔裡沒加引號的 `0000000000000001` 本來就是 YAML 數字，**不是** `processFrontMatter` 的問題。結論：系統欄位一律透過 `processFrontMatter` 寫入；讀取時以 `String(v)` 正規化。
+
+## S9 客戶端能否分辨 LiveSync 帶來的變更 —— ✅ 可以（M6-2 Task 1；Obsidian 1.13.7、LiveSync 0.25.56）
+
+LiveSync 寫入本機檔案時用兩個機制避免把自己的寫入再送出去，都在 `core._serviceModules.storageAccess.vaultAccess.storageAccessManager`：
+- `isFileProcessing(path)`：LiveSync 寫檔期間為 true（`processWriteFile` 包住寫入）。
+- `recentlyTouched({ path, stat })`：以「路徑＋mtime＋size」記錄最近 100 次寫入。
+
+在 vault-b 監聽 vault 事件、事件當下查這兩個值（`driver/s9.mjs`）：
+
+| 來源 | 事件 | processing | touched |
+|---|---|---|---|
+| A（經 LiveSync） | modify | true，接著第二個事件 false | 第一個 false，第二個 true |
+| A | create | true／false | false／true |
+| A 改名 | **delete 舊路徑＋create 新路徑**（不是 rename） | true | true／false→true |
+| A | delete | true | true |
+| B 本機 | modify／create／rename／delete | false | false |
+
+**結論**：`isFileProcessing(path) || recentlyTouched(file)` 為 true ＝ LiveSync 帶來的；兩者皆 false ＝ 本機動作。S9 也證實了 §8.8 的擔心：伺服器的改名到了裝置上是「刪除＋建立」。
+**對設計的影響**：客戶端即時還原只在兩者皆 false 時做（本機使用者刪除／改名），LiveSync 帶來的刪除一律不還原。這是內部 API：客戶端啟動時特徵檢查，不通過 → 不做客戶端還原，只靠伺服器兜底。
