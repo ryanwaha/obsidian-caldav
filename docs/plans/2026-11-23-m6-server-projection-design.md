@@ -112,8 +112,9 @@ flowchart LR
 # 可寫欄位（使用者、chip、Properties、Bases）
 title: 交週報
 status: needs-action          # VTODO：needs-action / in-process / completed / cancelled
-due: 2026-11-24               # VTODO；date 或 datetime（本地時間，無時區）
-# start / end                 # VEVENT 用這兩個，取代 status / due
+due: 2026-11-24               # VTODO；型別 date，一律只放日期
+due_time: "09:30"             # 型別 text（HH:mm）；沒有此欄位 = 全天
+# start / start_time / end / end_time   # VEVENT 用這些，取代 status / due / due_time
 list: tasks                   # 集合的短名；改了觸發 MOVE（S4 驗證不過則改唯讀）
 # 系統欄位（改了會被回滾）
 aliases: [交週報]              # 跟著 title；供 [[ 自動完成
@@ -133,7 +134,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 ```
 
 - **可寫性**沿用 `src/ical/editable.ts`：重複 VTODO 的 `status` 唯讀；重複 VEVENT、帶 override 的物件全部唯讀；`_deleted: true` 時全部唯讀。
-- **時間格式**：frontmatter 用 Obsidian 的 date／datetime 屬性格式（本地時間）。寫回時依 E3：帶時間寫 `TZID=Asia/Taipei`、全天寫 `VALUE=DATE`；使用者把 date 改成 datetime（或反之）視為改變形式，照新形式寫。
+- **時間格式（S3 後改）**：Obsidian 的 property 型別是整個 vault 一種（`.obsidian/types.json`，且不經 LiveSync 同步），同一欄位不能有時是 date、有時是 datetime（date 型別會藏掉時間、datetime 型別會把全天變成 00:00）。所以日期與時間拆成兩欄：`due`（date）＋`due_time`（text，`HH:mm`）。沒有 `due_time` 寫回 `VALUE=DATE`，有就寫 `TZID=Asia/Taipei`（E3）；使用者新增或刪除 `due_time` 即改變形式。客戶端與伺服器模式啟動時用 `app.metadataTypeManager.setType` 設定 `due`、`start`、`end` 為 date，`*_time` 為 text（每台裝置各自需要）。
 - **系統欄位一律 `_` 前綴**，讓人一眼看出改了無效；`aliases` 例外（Obsidian 指定名稱）。
 - `_hash` 定義：可寫欄位依固定順序、正規化值後序列化再雜湊。客戶端與伺服器用同一函式。
 
@@ -153,7 +154,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 | 搬移偵測 | CREATED＋SUMMARY 比對 | 沿用 `src/sync/moves.ts`；結果改為觸發 rename，不寫 aliases store |
 | 快取 | 物件、tombstone，以及新 store **`projections`**：每個投影檔的完整最後內容（含 body）、上次投影的可寫欄位值、`_etag` | 擴充 `src/cache/db.ts` |
 | 投影器 | 物件 → frontmatter；**只在值改變時寫入**；維護 `_lists.md` | 新 |
-| 上行處理 | 監看 `_caldav/` 的 modify／create／delete／rename；依檔案 debounce；讀 frontmatter 與上次投影比對出差異 | 新 |
+| 上行處理 | 以 `metadataCache.on('changed')` 觸發（`modify` 當下 metadataCache 仍是舊值，S3）；delete／rename 用 vault 事件；依檔案 debounce 1 s；讀 frontmatter 與上次投影比對出差異 | 新 |
 | 寫回 | 差異 → `If-Match` + M4 逐行修補 → 成功後重新投影；412 → M4 自動合併，合併不了寫 `_sync: conflict` | 沿用 `src/ical/patch.ts`、`src/caldav/client.ts` |
 | 回滾兜底 | 刪除／改名／搬出 → 從 `projections` 還原（含 body）；系統欄位被改 → 重新投影 frontmatter | 新 |
 | 遷移指令 | 一次性：把 vault 裡的 `[label](cal:id)` 改寫成 `[[id\|label]]`；空白標籤填入當下標題；無法解析的參照保留原文並列出（見 §12） | 新；沿用 `src/backlinks/scan.ts` 的排除規則 |
@@ -167,7 +168,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 | chip 渲染 | 對解析到 `_caldav/` 檔案的 wikilink，在連結**後面**附加 chip（☐、日期、⋯、狀態燈）；資料讀 `metadataCache`；`changed` 時重繪 | 改寫 `src/render/`；閱讀模式選 `a.internal-link`，Live Preview 用 `Decoration.widget(side:1)` |
 | chip 寫入 | 所有修改透過 `processFrontMatter` 寫可寫欄位或 `_request` | 新 |
 | 狀態燈 | `_sync` 為 rejected／conflict → 紅；目前可寫欄位雜湊 ≠ `_hash` → 等待中；否則正常；`_deleted` → 已刪除 | 新 |
-| 守門 | 投影檔修改時本機檢查，改了唯讀欄位立即通知（不自行還原，由伺服器回滾）；刪除／改名立即還原並通知 | 新 |
+| 守門 | 投影檔 `changed` 時本機檢查，改了唯讀欄位立即通知（不自行還原，由伺服器回滾）；刪除／改名立即還原並通知 | 新 |
 | 回饋 | 監看 `_sync` 變化 → 通知；conflict 時通知附按鈕開啟選擇對話框 | 改寫 `src/ui/` 既有衝突 UI |
 | 新建指令 | 對話框（標題、清單、類型、日期）→ 本機產生 UID → 建立投影檔（無 `_etag`）→ 插入 `[[短ID\|標題]]` | 改寫 `src/ui/newTaskModal.ts` |
 | 更新快照標籤 | chip 選單：把目前筆記裡指向此任務的連結標籤改成目前標題（使用者指令） | 新 |
@@ -208,7 +209,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 - **iOS 搬清單**（舊 UID 刪、新 UID 建）：搬移偵測唯一命中 → 以 `renameFile` 把舊投影檔改名為新短 ID（body 隨檔保留，Obsidian 更新所有連結）→ 重新投影 frontmatter。0 筆 → 按刪除處理；多筆 → 不 rename，`_sync: rejected` 並在 `_sync_msg` 列候選。
   - 若新 UID 的投影檔已先被建立（新物件比搬移偵測先投影）：把舊檔 body 併入（舊 body 在前）後刪除較新的空檔，再 rename。實作者可選其他做法，但不得遺失任一邊的 body。
   - rename 依賴伺服器實例的「自動更新內部連結」設定為開啟；伺服器模式啟動時檢查並警告。
-- **Obsidian 改 `list`**：WebDAV `MOVE`，UID 不變，檔名不變。S4 驗證失敗則 `list` 改唯讀。
+- **Obsidian 改 `list`**：WebDAV `MOVE`（`Overwrite: F`，目的地衝突 412 → `_sync: rejected`），UID、內容、ETag 都不變，檔名不變（S4）。同步引擎會看到「舊集合 404＋新集合出現同一 UID」，必須直接更新投影檔的 `list`，不能先標 `_deleted`。原生客戶端若也用 MOVE 搬移，同樣走這條路。
 
 ### 8.5 刪除
 
@@ -224,6 +225,15 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 | 改系統欄位 | 通知 | 重新投影 frontmatter |
 
 客戶端的還原內容來源留給實作者（記憶體快照、Obsidian `.trash` 等），但必須包含 body；做不到時只通知，交給伺服器。
+
+### 8.7 LiveSync 衝突（S5 後新增）
+
+- frontmatter 對 body、frontmatter 的不同欄位，LiveSync 會自動合併，不需處理。
+- 同一行被兩邊改成不同值（使用者改欄位的同時，伺服器因原生客戶端的修改重寫同一欄位）會產生 LiveSync 衝突，對話框可能跳在 headless 伺服器上。
+- 伺服器模式：
+  1. 檔案最近 10 s 內收到遠端修改時延後重寫，且先處理完上行再重新投影。
+  2. 偵測 `_caldav/` 檔案的 LiveSync 衝突並以程式解決：frontmatter 取 CalDAV 的值，裝置版本的不同值寫入 `_conflict`（交給 D8 的客戶端對話框），body 不同時串接。**M6-1 開頭先實測 LiveSync 內部 API（`getConflictedDoc`、`tryAutoMerge`）能否做到**；做不到時另議。
+- 裝置之間（iPhone 對 Windows）的同行衝突是 LiveSync 既有行為，維持由使用者在 LiveSync 對話框處理。
 
 ## 9. 對其他服務與流程的影響
 
@@ -241,17 +251,22 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 - 快照標籤會過期；更新需手動指令。
 - Bases／frontmatter 表現力有限；重複任務唯讀。
 - 只在 tailnet 內可用（不變）。
+- 伺服器的 CalDAV 帳密存在 `secretStorage`；`--password-store=basic` 下只是混淆，等同 600 權限的檔案（S6）。
+- 正式 headless 實例停在 1.13.7，實測在 1.15.1；上線前要升級或重驗（版本凍結見 vault `infrastructure/obsidian-versions.md`）。
+- 同一 property 只能有一種型別，日期與時間分兩欄，在 Bases 裡排序、顯示要用兩欄（S3）。
 
-## 11. 動工前驗證（spike）
+## 11. 動工前驗證（spike）—— 已完成 2026-11-23
 
-| # | 項目 | 不通過時 |
-|---|---|---|
-| S1 | Live Preview 中 wikilink 的 syntax tree 節點名稱與結尾位置，widget 能否穩定附加 | 退回只做閱讀模式 chip + Live Preview 用 CSS |
-| S2 | `[[` 自動完成選 alias 插入的格式（預期 `[[id\|alias]]`） | 新建／插入改由插件指令完成 |
-| S3 | Properties、Bases 編輯一次觸發幾次 modify；Bases 表格能否直接編輯 | 調整伺服器 debounce |
-| S4 | Radicale 是否支援 `MOVE`，UID／ETag 行為 | `list` 改唯讀 |
-| S5 | 同檔案 frontmatter 與 body 被兩端同時修改時，LiveSync 能否自動合併 | 伺服器寫入前延後（檔案近期有遠端修改時等候），或接受手動解衝突 |
-| S6 | headless（`--password-store=basic`）下 `secretStorage` 可用性 | 帳密改存插件設定（伺服器本機，600 權限的 vault 外檔案） |
+細節與證據：`docs/plans/2026-11-23-m6-0-spike-results.md`。實測 app 版本 1.15.1（與 iPhone 同）。
+
+| # | 項目 | 結果 | 對設計的影響 |
+|---|---|---|---|
+| S1 | Live Preview 中 wikilink 的節點與 widget | ✅ | 依節點序列 `formatting-link-start` → `hmd-internal-link*` → `formatting-link-end` 找連結，在 `formatting-link-end.to` 加 `Decoration.widget({side:1})`；程式碼自然排除；嵌入不加 chip（§7.2） |
+| S2 | `[[` 自動完成選 alias 的格式 | ✅ | 插入 `[[短ID\|標題]]`；alias 含 `\|`、`#` 也正確解析，不需清理 |
+| S3 | Properties／Bases 編輯的事件 | ✅＋⚠️ | 每次確認只產生一組 modify＋changed，Bases 表格可直接編輯；debounce 1 s。**同一 property 只能有一種型別** → 日期欄位拆分（§6.2） |
+| S4 | Radicale `MOVE` | ✅ | UID、內容、ETag 都保留；`list` 維持可寫（§8.4） |
+| S5 | LiveSync 同時修改 | ⚠️ | frontmatter 對 body、不同欄位都自動合併；同一行不同值會衝突，且對話框可能卡在 headless → 新增 §8.7 |
+| S6 | headless 的 `secretStorage` | ✅ | 沿用；`basic` 模式只是混淆，列入 §10 |
 
 ## 12. 從 0.5.0 切換（決策紀錄，Claude 的判斷）
 
@@ -260,7 +275,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 - **切換用一份手動檢查表，不寫偵測舊版的程式。**
   1. 每台裝置確認 0.5.0 的待送佇列為空（有失敗項就先處理）。
   2. 所有客戶端停用 0.5.0，或升級後設為客戶端模式；刪除裝置上的 CalDAV 帳密。
-  3. headless 實例啟用伺服器模式，完成第一次全量投影。
+  3. headless 實例升級到與裝置相同的 Obsidian 版本（或對 1.13.7 重驗 S1–S3），啟用伺服器模式，完成第一次全量投影。
   4. 在伺服器執行遷移指令，處理它列出的未解析參照。
   - 理由：只有兩台客戶端（iPhone、Windows），手動確認比寫防呆便宜。步驟 2 完成前不執行步驟 3，就不會同時有兩個 CalDAV 寫入者。
 
