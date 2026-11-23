@@ -2,7 +2,10 @@ import type { CacheStore } from "../cache/db";
 import type { PendingUpdate } from "../types";
 import { enqueuePatch, rehome } from "./enqueue";
 import { applySetUnset } from "./snapshot";
-import { planUpstream } from "./upstream";
+import { dueOf, planUpstream } from "./upstream";
+import { buildTodo } from "../ical/build";
+import { shortId } from "../shortid";
+import { listName } from "./types";
 import { WRITABLE_KEYS } from "./types";
 
 export interface UpstreamDeps {
@@ -18,6 +21,26 @@ export interface UpstreamDeps {
 
 const ok = (st: number) => st >= 200 && st < 300;
 
+/** 裝置新建的投影檔（沒有 `_etag`、快取沒有這個 uid）→ 0.5.0 的 PendingCreate（設計 D9） */
+async function createFrom(path: string, fm: Record<string, unknown>, body: string, d: UpstreamDeps): Promise<void> {
+  const uid = fm._uid as string;
+  const fail = async (msg: string) => { await d.writeFm(path, { _sync: "rejected", _sync_msg: msg }, []); };
+  if (fm._kind !== undefined && fm._kind !== "VTODO") return fail("事件請在行事曆 App 建立");
+  const title = typeof fm.title === "string" ? fm.title.trim() : "";
+  if (!title) return fail("標題不能是空的");
+  const cols = (await d.cache.getCollections()).filter((c) => listName(c.href) === String(fm.list ?? "") && c.components.includes("VTODO"));
+  if (cols.length !== 1) return fail(`找不到清單：${fm.list ?? "空"}`);
+  const due = dueOf(fm);
+  if ("error" in due) return fail(due.error);
+  const now = d.now();
+  const ics = buildTodo({ uid, summary: title, due: due.due ?? undefined }, now);
+  const href = `${cols[0].href}${uid}.ics`;
+  await d.cache.enqueue({ uid, shortId: await shortId(uid), fingerprint: d.cache.fingerprint, collection: cols[0].href, href, ics, summary: title,
+    createdAt: now.getTime(), attempts: 0, state: "queued" });
+  await d.cache.putProjection({ path, uid, fm: applySetUnset(fm, {}, []), body, writtenAt: Date.now() });
+  d.syncSoon();
+}
+
 /**
  * 上行的核心（設計 §8.2），與 Obsidian 無關以便測試。
  * fm/body 是這一次處理讀到的檔案內容；新的快照只由它與伺服器寫回的 set/unset 推導（review C1）。
@@ -26,6 +49,10 @@ export async function processUpstream(path: string, fm: Record<string, unknown>,
   const { cache } = d;
   const snap = await cache.getProjection(path);
   if (typeof fm._uid !== "string") return;
+  if (!snap && (fm._etag == null || fm._etag === "")) {
+    const known = (await cache.allObjects()).some((o) => o.uid === fm._uid) || !!(await cache.getPending(fm._uid as string));
+    if (!known) { await createFrom(path, fm, body, d); return; }
+  }
   if (!snap) {
     // 同一個 uid 在別處已有快照 → 這是改名或複製出來的檔，交給 guard／對帳處理，不當成新的 base（review I4）
     if ((await cache.projectionsByUid(fm._uid)).length) return;

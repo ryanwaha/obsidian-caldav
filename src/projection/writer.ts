@@ -105,6 +105,13 @@ export class ProjectionWriter {
       }
     }
     // 失敗的待送已經投影成 _sync: rejected（值回到伺服器的），伺服器模式不再保留
+    // 裝置新建、伺服器拒收（PendingCreate failed）：標在檔案上，然後移除（M6-3）
+    for (const c of (await cache.allPending()).filter((p) => !isUpdate(p) && p.state === "failed")) {
+      const f = files.find((x) => x.fm?._uid === c.uid);
+      if (!f) continue;
+      try { await this.writeFmOnly(f.path, { _sync: "rejected", _sync_msg: `新建失敗：${c.lastError ?? ""}`.trim() }, []); await cache.removePending(c.uid); }
+      catch (e) { console.warn("[obsidian-caldav] 標記新建失敗", f.path, e); }
+    }
     // 只在 rejected 已成功投影到檔案之後才刪（review I2）
     for (const p of pending.values()) if (p.state === "failed" && p.uid && updatedUids.has(p.objUid)) await cache.removePending(p.uid);
     return stats;

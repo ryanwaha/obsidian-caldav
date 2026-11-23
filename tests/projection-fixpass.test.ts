@@ -175,3 +175,25 @@ describe("I4 follow-up: runner must not snapshot a renamed copy", () => {
     expect(await cache.getProjection("_caldav/我改的名字.md")).toBeUndefined();
   });
 });
+
+describe("M6-3 Task 1: server-side create from a projection file", () => {
+  test("file without _etag and unknown uid → PendingCreate", async () => {
+    const { cache } = await setup();
+    const { d, calls } = deps(cache);
+    const fm = { title: "裝置新建", status: "needs-action", due: "2026-12-01", due_time: "09:30", list: "work", _kind: "VTODO", _uid: "new-1" };
+    await processUpstream("_caldav/nnnnnnnn.md", fm, "", d);
+    const p = await cache.getPending("new-1");
+    expect(p).toMatchObject({ uid: "new-1", collection: W, href: `${W}new-1.ics`, state: "queued" });
+    expect((p as { ics: string }).ics).toContain("SUMMARY:裝置新建");
+    expect((p as { ics: string }).ics).toContain("DUE;TZID=Asia/Taipei:20261201T093000");
+    expect(calls).toContain("sync");
+    expect(await cache.getProjection("_caldav/nnnnnnnn.md")).toBeDefined();
+  });
+  test("unknown list → rejected, nothing queued", async () => {
+    const { cache } = await setup();
+    const { d, writes } = deps(cache);
+    await processUpstream("_caldav/nnnnnnnn.md", { title: "x", list: "nope", _kind: "VTODO", _uid: "new-2" }, "", d);
+    expect(await cache.getPending("new-2")).toBeUndefined();
+    expect(writes[0].set).toMatchObject({ _sync: "rejected" });
+  });
+});

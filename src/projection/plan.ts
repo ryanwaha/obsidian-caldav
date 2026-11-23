@@ -124,6 +124,7 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
   for (const [uid, f] of byUid) {
     if (live.has(uid)) continue;
     const fm = f.fm!;
+    if (fm._etag == null || fm._etag === "") continue; // 裝置新建、伺服器還沒送出（M6-3）：不是被刪除
     const tombs = input.tombstones.filter((t) => t.uid === uid);
     if (!tombs.length) { if (input.complete && fm._deleted !== true) out.push(update(f.path, { _deleted: true })); continue; }
     const res = resolver.resolve(tombs);

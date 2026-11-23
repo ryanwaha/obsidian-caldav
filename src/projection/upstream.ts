@@ -37,6 +37,10 @@ function addDay(date: string): string {
 class Reject extends Error {}
 
 /** 日期＋時間兩欄 → Patch 的日期值；兩者皆空為 null（設計 §6.2）。 */
+export function dueOf(fm: Record<string, unknown>): { due: { date: string; time?: string } | null } | { error: string } {
+  try { return { due: dateValue(str(fm.due), str(fm.due_time), "到期") }; } catch (e) { if (e instanceof Reject) return { error: e.message }; throw e; }
+}
+
 function dateValue(date: string | undefined, time: string | undefined, label: string): { date: string; time?: string } | null {
   if (!date && !time) return null;
   if (!date) throw new Reject(`${label}：有時間但沒有日期`);

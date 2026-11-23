@@ -220,6 +220,11 @@ test("livesync-conflict-marker-persists", async () => {
   expect(plan(await input([a], [file("_caldav/aaaaaaaa.md", marked)]))).toEqual([]);
 });
 
+test("unsent-create-not-deleted", async () => {
+  const fm = { title: "新任務", status: "needs-action", list: "tasks", _kind: "VTODO", _uid: "new-1" };
+  expect(plan(await input([], [file("_caldav/nnnnnnnn.md", fm)], { complete: true }))).toEqual([]);
+});
+
 test("never-delete", () => {
   for (const r of all) for (const a of r) expect(["create", "update", "rename", "merge-into"]).toContain(a.op);
 });
