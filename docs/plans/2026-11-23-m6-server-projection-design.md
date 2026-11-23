@@ -1,6 +1,6 @@
 # M6 伺服器端投影：設計文件
 
-> 狀態：設計已核可（2026-11-23）；M6-0 實測帶來的變更（§6.2 日期拆欄、§8.7 衝突處理）**待使用者確認**
+> 狀態：設計已核可（2026-11-23）；M6-0 實測帶來的變更（§6.2 日期拆欄、§8.7 衝突處理）已確認（2026-11-23）
 > 上游文件：`~/docs/homelab/services/obsidian-caldav.md`（現行 0.5.0 架構）。M6 上線後，該文件依本設計改寫。
 
 ---
@@ -134,7 +134,7 @@ _request:                     # 客戶端→伺服器的指令管道：delete / 
 ```
 
 - **可寫性**沿用 `src/ical/editable.ts`：重複 VTODO 的 `status` 唯讀；重複 VEVENT、帶 override 的物件全部唯讀；`_deleted: true` 時全部唯讀。
-- **時間格式（S3 後改，待使用者確認；M6-1 開頭補測 `due_time` 在 Properties／Bases 的寫入原文——`09:30` 不加引號時 YAML 1.1 會當成數字——以及各裝置 `setType` 的效果；格式不合 `HH:mm` → `_sync: rejected`）**：Obsidian 的 property 型別是整個 vault 一種（`.obsidian/types.json`，且不經 LiveSync 同步），同一欄位不能有時是 date、有時是 datetime（date 型別會藏掉時間、datetime 型別會把全天變成 00:00）。所以日期與時間拆成兩欄：`due`（date）＋`due_time`（text，`HH:mm`）。沒有 `due_time` 寫回 `VALUE=DATE`，有就寫 `TZID=Asia/Taipei`（E3）；使用者新增或刪除 `due_time` 即改變形式。客戶端與伺服器模式啟動時用 `app.metadataTypeManager.setType` 設定 `due`、`start`、`end` 為 date，`*_time` 為 text（每台裝置各自需要；前提是 LiveSync 的 Hidden File Sync 不啟用，這是 `services/obsidian-server.md` 既有的原則）。
+- **時間格式（S3 後改，已確認；M6-1 開頭補測 `due_time` 在 Properties／Bases 的寫入原文——`09:30` 不加引號時 YAML 1.1 會當成數字——以及各裝置 `setType` 的效果；格式不合 `HH:mm` → `_sync: rejected`）**：Obsidian 的 property 型別是整個 vault 一種（`.obsidian/types.json`，且不經 LiveSync 同步），同一欄位不能有時是 date、有時是 datetime（date 型別會藏掉時間、datetime 型別會把全天變成 00:00）。所以日期與時間拆成兩欄：`due`（date）＋`due_time`（text，`HH:mm`）。沒有 `due_time` 寫回 `VALUE=DATE`，有就寫 `TZID=Asia/Taipei`（E3）；使用者新增或刪除 `due_time` 即改變形式。客戶端與伺服器模式啟動時用 `app.metadataTypeManager.setType` 設定 `due`、`start`、`end` 為 date，`*_time` 為 text（每台裝置各自需要；前提是 LiveSync 的 Hidden File Sync 不啟用，這是 `services/obsidian-server.md` 既有的原則）。
 - **系統欄位一律 `_` 前綴**，讓人一眼看出改了無效；`aliases` 例外（Obsidian 指定名稱）。
 - `_hash` 定義：可寫欄位依固定順序、正規化值後序列化再雜湊。客戶端與伺服器用同一函式。
 
