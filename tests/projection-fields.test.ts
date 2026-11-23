@@ -60,3 +60,11 @@ test("hash stable", async () => {
 });
 
 test("etag", async () => expect((await projectFields(await obj(todo("t8"), '"zz"')))._etag).toBe('"zz"'));
+
+test("all-day vevent end is inclusive (DTEND − 1 day, like Full Calendar)", async () => {
+  const one = await projectFields(await obj(vevent(["DTSTART;VALUE=DATE:20261124", "DTEND;VALUE=DATE:20261125"])));
+  expect(one).toMatchObject({ start: "2026-11-24", end: "2026-11-24" });
+  expect(one).not.toHaveProperty("end_time");
+  const span = await projectFields(await obj(vevent(["DTSTART;VALUE=DATE:20261130", "DTEND;VALUE=DATE:20261202"])));
+  expect(span).toMatchObject({ start: "2026-11-30", end: "2026-12-01" });
+});

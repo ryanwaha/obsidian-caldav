@@ -115,6 +115,7 @@ status: needs-action          # VTODO：needs-action / in-process / completed / 
 due: 2026-11-24               # VTODO；型別 date，一律只放日期
 due_time: "09:30"             # 型別 text（HH:mm）；沒有此欄位 = 全天
 # start / start_time / end / end_time   # VEVENT 用這些，取代 status / due / due_time
+#   全天 VEVENT 的 end 是「含當天」：DTEND（不含）減一天；寫回時加一天（2026-11-23 決定，比照 Full Calendar）
 list: tasks                   # 集合的短名；改了觸發 MOVE（S4 已驗證）
 # 系統欄位（改了會被回滾）
 aliases: [交週報]              # 跟著 title；供 [[ 自動完成
