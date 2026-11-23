@@ -204,3 +204,44 @@ describe("aliases (db v3)", () => {
     expect(await s.allPending()).toHaveLength(1);
   });
 });
+
+describe("projections store (M6-2)", () => {
+  const snap = (path: string) => ({ path, uid: `u-${path}`, fm: { title: "t", _etag: '"1"' }, body: "筆記\n", writtenAt: 1 });
+  test("projections round-trip", async () => {
+    const s = await open(fresh());
+    await s.putProjection(snap("_caldav/a.md"));
+    expect(await s.getProjection("_caldav/a.md")).toEqual(snap("_caldav/a.md"));
+    expect(await s.allProjections()).toHaveLength(1);
+    await s.deleteProjection("_caldav/a.md");
+    expect(await s.getProjection("_caldav/a.md")).toBeUndefined();
+  });
+  test("upgrade from v3 keeps objects", async () => {
+    const name = fresh();
+    await new Promise<void>((resolve, reject) => {
+      const r = indexedDB.open(name, 3);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        db.createObjectStore("meta"); db.createObjectStore("collections", { keyPath: "href" });
+        const o = db.createObjectStore("objects", { keyPath: "href" }); o.createIndex("shortId", "shortId"); o.createIndex("collection", "collection");
+        db.createObjectStore("tombstones", { keyPath: "href" }).createIndex("shortId", "shortId");
+        db.createObjectStore("pending", { keyPath: "uid" }).createIndex("shortId", "shortId");
+        db.createObjectStore("aliases", { keyPath: "fromUid" }).createIndex("fromShortId", "fromShortId");
+        o.put(obj("/v3.ics", "vvvvvvvv")); db.transaction; r.transaction!.objectStore("meta").put("srv|ryanw", "fingerprint");
+      };
+      r.onsuccess = () => { r.result.close(); resolve(); };
+      r.onerror = () => reject(r.error);
+    });
+    const s = await open(name);
+    expect((await s.findByShortId("vvvvvvvv")).map((o) => o.href)).toEqual(["/v3.ics"]);
+    await s.putProjection(snap("_caldav/b.md"));
+    expect(await s.getProjection("_caldav/b.md")).toBeDefined();
+  });
+  test("fingerprint change clears projections", async () => {
+    const name = fresh();
+    const s = await open(name);
+    await s.putProjection(snap("_caldav/a.md"));
+    s.close();
+    const s2 = await open(name, "other|user");
+    expect(await s2.allProjections()).toEqual([]);
+  });
+});

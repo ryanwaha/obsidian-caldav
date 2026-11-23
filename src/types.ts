@@ -98,4 +98,7 @@ export interface PendingUpdate {
 }
 
 export type PendingOp = PendingCreate | PendingUpdate;
+
+/** M6 伺服器模式：上次寫出的投影（三方比對的 base；回滾還原的來源）。 */
+export interface ProjectionSnap { path: string; uid: string; fm: Record<string, unknown>; body: string; writtenAt: number }
 export const isUpdate = (p: PendingOp): p is PendingUpdate => p.op === "update";
