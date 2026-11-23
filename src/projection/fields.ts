@@ -24,7 +24,7 @@ function description(ics: string): string | undefined {
 }
 
 /** 全天 VEVENT 的 DTEND 不含當天（RFC 5545）；投影成含當天的結束日，寫回時加一天（設計 §6.2，比照 Full Calendar）。 */
-function inclusiveEnd(d: DateValue): DateValue {
+export function inclusiveEnd(d: DateValue): DateValue {
   const v = d.value;
   const t = new Date(Date.UTC(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)) - 86_400_000);
   const p = (n: number) => String(n).padStart(2, "0");

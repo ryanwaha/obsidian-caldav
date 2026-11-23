@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { projectFields } from "../src/projection/fields";
 import { planReconcile, type ProjAction, type ProjFile, type ReconcileInput } from "../src/projection/plan";
 import type { ProjFm } from "../src/projection/types";
-import type { Alias, CalObject, CollectionInfo, Tombstone } from "../src/types";
+import type { Alias, CalObject, CollectionInfo, PendingUpdate, Tombstone } from "../src/types";
 
 const T = "/ryanw/tasks/", W = "/ryanw/work/";
 const cols: CollectionInfo[] = [
@@ -20,7 +20,7 @@ const file = (path: string, fm: Record<string, unknown> | null, bodyEmpty = true
 async function input(objects: CalObject[], files: ProjFile[], extra: Partial<ReconcileInput> = {}): Promise<ReconcileInput> {
   const projected = new Map<string, ProjFm>();
   for (const x of objects) projected.set(x.uid, await projectFields(x));
-  return { objects, projected, tombstones: [], aliases: [], collections: cols, whitelist: [], files, now: 2000, complete: true, ...extra };
+  return { objects, projected, tombstones: [], aliases: [], collections: cols, whitelist: [], files, now: 2000, complete: true, pending: new Map(), ...extra };
 }
 const fmOf = async (x: CalObject) => ({ ...(await projectFields(x)) } as Record<string, unknown>);
 const all: ProjAction[][] = [];
@@ -160,6 +160,43 @@ test("moved-to-out-of-scope-collection: no rename, marked out of scope, stable",
   expect(plan(i)).toEqual([{ op: "update", path: "_caldav/aaaaaaaa.md", set: { _sync: "rejected", _sync_msg: "集合不在投影範圍" }, unset: [] }]);
   const marked = { ...(await fmOf(old)), _sync: "rejected", _sync_msg: "集合不在投影範圍" };
   expect(plan({ ...i, files: [file("_caldav/aaaaaaaa.md", marked, false)] })).toEqual([]);
+});
+
+const pend = (uid: string, state: PendingUpdate["state"], extra: Partial<PendingUpdate> = {}): PendingUpdate => ({
+  op: "update", uid: `upd:${T}${uid}.ics`, objUid: uid, shortId: "x", fingerprint: "fp", collection: T, href: `${T}${uid}.ics`,
+  baseIcs: "", baseEtag: '"e"', patch: { summary: "我的標題" }, summary: "我的標題", createdAt: 0, attempts: 0, state, ...extra,
+});
+
+test("pending-keeps-mine", async () => {
+  const a = o("a", "aaaaaaaa", { summary: "伺服器新標題", etag: '"e2"' });
+  const mine = { ...(await fmOf(o("a", "aaaaaaaa"))), title: "我的標題" };
+  const r = plan(await input([a], [file("_caldav/aaaaaaaa.md", mine)], { pending: new Map([["a", pend("a", "queued")]]) }));
+  for (const x of r) {
+    const u = x as Extract<ProjAction, { op: "update" }>;
+    expect(u.set).not.toHaveProperty("title");
+    expect(u.set).not.toHaveProperty("aliases");
+    expect(u.set).not.toHaveProperty("_hash");
+  }
+});
+
+test("pending-conflict-projects-conflict", async () => {
+  const a = o("a", "aaaaaaaa", { summary: "伺服器標題" });
+  const p = pend("a", "conflict", { conflict: { serverIcs: "", serverEtag: '"e"', base: { summary: "原", status: "" }, mine: { summary: "我的標題", status: "" }, server: { summary: "伺服器標題", status: "" } } });
+  const r = plan(await input([a], [file("_caldav/aaaaaaaa.md", { ...(await fmOf(a)), title: "我的標題" })], { pending: new Map([["a", p]]) }));
+  const u = r[0] as Extract<ProjAction, { op: "update" }>;
+  expect(u.set).toMatchObject({ title: "伺服器標題", _sync: "conflict", _conflict: { title: { mine: "我的標題", theirs: "伺服器標題" } } });
+});
+
+test("pending-failed-projects-rejected", async () => {
+  const a = o("a", "aaaaaaaa");
+  const r = plan(await input([a], [file("_caldav/aaaaaaaa.md", { ...(await fmOf(a)), title: "我的標題" })], { pending: new Map([["a", pend("a", "failed", { lastError: "HTTP 403" })]]) }));
+  expect((r[0] as Extract<ProjAction, { op: "update" }>).set).toMatchObject({ title: "a", _sync: "rejected", _sync_msg: "HTTP 403" });
+});
+
+test("conflict-cleared-after-resolution", async () => {
+  const a = o("a", "aaaaaaaa");
+  const r = plan(await input([a], [file("_caldav/aaaaaaaa.md", { ...(await fmOf(a)), _sync: "conflict", _conflict: { title: { mine: "x", theirs: "a" } } })]));
+  expect(r).toEqual([{ op: "update", path: "_caldav/aaaaaaaa.md", set: { _sync: "ok" }, unset: ["_conflict"] }]);
 });
 
 test("never-delete", () => {

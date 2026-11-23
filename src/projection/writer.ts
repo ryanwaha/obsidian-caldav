@@ -1,6 +1,7 @@
 import { type App, Notice, parseYaml, stringifyYaml, TFile } from "obsidian";
 import { newFileContent, splitFrontmatter as split } from "./frontmatter";
 import type { CacheStore } from "../cache/db";
+import { isUpdate } from "../types";
 import { projectFields } from "./fields";
 import { planReconcile, type ProjAction, type ProjFile } from "./plan";
 import { PROJ_DIR, type ProjFm } from "./types";
@@ -65,6 +66,7 @@ export class ProjectionWriter {
       objects, projected,
       tombstones: await cache.allTombstones(), aliases: await cache.allAliases(), collections,
       whitelist: wl, files: await this.readFiles(), now: Date.now(), complete,
+      pending: new Map((await cache.allPending()).filter(isUpdate).filter((p) => p.fingerprint === cache.fingerprint).map((p) => [p.objUid, p])),
     });
 
     const canRename = (vault as typeof vault & { getConfig(k: string): unknown }).getConfig("alwaysUpdateLinks") === true;

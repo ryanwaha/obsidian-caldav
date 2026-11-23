@@ -9,6 +9,7 @@ export interface ProjFm {
   list: string; aliases: string[];
   _kind: "VTODO" | "VEVENT"; _uid: string; _notes?: string; _rrule?: string;
   _etag: string; _hash: string; _sync: "ok" | "rejected" | "conflict"; _sync_msg?: string; _deleted: boolean;
+  _conflict?: Record<string, { mine: string | null; theirs: string | null }>;
 }
 
 export const listName = (collectionHref: string) => collectionHref.replace(/\/+$/, "").split("/").pop()!;

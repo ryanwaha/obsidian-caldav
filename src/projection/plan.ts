@@ -1,6 +1,8 @@
 import { MoveResolver } from "../sync/moves";
-import type { Alias, CalObject, CollectionInfo, Tombstone } from "../types";
-import { PROJ_DIR, type ProjFm } from "./types";
+import type { Alias, CalObject, CollectionInfo, DateValue, Managed, PendingUpdate, Tombstone } from "../types";
+import { toLocalParts } from "./dates";
+import { inclusiveEnd } from "./fields";
+import { PROJ_DIR, type ProjFm, WRITABLE_KEYS } from "./types";
 
 export interface ProjFile { path: string; fm: Record<string, unknown> | null; bodyEmpty: boolean }
 export type ProjAction =
@@ -21,6 +23,8 @@ export interface ReconcileInput {
   now: number;
   /** 上一輪同步無錯誤，且範圍內每個集合都同步過。不完整時，沒有 tombstone 的檔案不標刪除（review I3）。 */
   complete: boolean;
+  /** 伺服器上該物件的待送修改（key = objUid），M6-2 三方對帳 */
+  pending: Map<string, PendingUpdate>;
 }
 
 const MSG_FOREIGN = "不是投影檔";
@@ -29,9 +33,9 @@ const MSG_MOVE_HAS_BODY = "搬移目標已有內容，請手動合併";
 
 /** 受管欄位：投影會設定或清除的鍵。M6-2 的 `_conflict`、`_request` 不在此列，對帳不碰。 */
 const MANAGED = ["title", "status", "due", "due_time", "start", "start_time", "end", "end_time", "list",
-  "aliases", "_kind", "_uid", "_notes", "_rrule", "_etag", "_hash", "_sync", "_sync_msg", "_deleted"];
+  "aliases", "_kind", "_uid", "_notes", "_rrule", "_etag", "_hash", "_sync", "_sync_msg", "_deleted", "_conflict"];
 
-const norm = (v: unknown) => (v == null ? null : Array.isArray(v) ? JSON.stringify(v.map(String)) : String(v));
+const norm = (v: unknown) => (v == null ? null : Array.isArray(v) ? JSON.stringify(v.map(String)) : typeof v === "object" ? JSON.stringify(v) : String(v));
 
 function fnv1a(s: string): string {
   let h = 0x811c9dc5;
@@ -49,6 +53,31 @@ function diff(cur: Record<string, unknown>, want: ProjFm): { set: Partial<ProjFm
   }
   return { set: set as Partial<ProjFm>, unset };
 }
+
+/** managedValues 的日期字串（"date|tzid|20261124" 或 "date-time|Asia/Taipei|20261124T093000"）→ DateValue */
+function managedDate(s: string | undefined): DateValue | undefined {
+  if (!s) return undefined;
+  const [type, tzid, value] = s.split("|");
+  return { value, dateOnly: type === "date", ...(tzid ? { tzid } : {}) };
+}
+
+/** Managed（衝突比對用）→ 投影欄位名，供 `_conflict` 使用 */
+function managedFields(kind: "VTODO" | "VEVENT", m: Managed): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = { title: m.summary };
+  const put = (key: string, d: DateValue | undefined) => { if (!d) { out[key] = undefined; out[`${key}_time`] = undefined; return; } const p = toLocalParts(d); out[key] = p.date; out[`${key}_time`] = p.time; };
+  if (kind === "VTODO") { out.status = m.status ? m.status.toLowerCase() : undefined; put("due", managedDate(m.date)); }
+  else { put("start", managedDate(m.date)); const e = managedDate(m.end); put("end", e && e.dateOnly ? inclusiveEnd(e) : e); }
+  return out;
+}
+
+function conflictOf(kind: "VTODO" | "VEVENT", c: NonNullable<PendingUpdate["conflict"]>): Record<string, { mine: string | null; theirs: string | null }> {
+  const mine = managedFields(kind, c.mine), theirs = managedFields(kind, c.server);
+  const out: Record<string, { mine: string | null; theirs: string | null }> = {};
+  for (const k of Object.keys(mine)) if ((mine[k] ?? null) !== (theirs[k] ?? null)) out[k] = { mine: mine[k] ?? null, theirs: theirs[k] ?? null };
+  return out;
+}
+
+const KEEP_WHILE_QUEUED = new Set<string>([...WRITABLE_KEYS, "aliases", "_hash"]);
 
 const update = (path: string, set: Partial<ProjFm>, unset: string[] = []): ProjAction => ({ op: "update", path, set, unset });
 
@@ -123,10 +152,19 @@ export function planReconcile(input: ReconcileInput): ProjAction[] {
       if (cur && (cur.fm!._sync !== "rejected" || cur.fm!._sync_msg !== MSG_OUT_OF_SCOPE)) out.push(update(cur.path, { _sync: "rejected", _sync_msg: MSG_OUT_OF_SCOPE }));
       continue;
     }
-    const want = input.projected.get(o.uid);
-    if (!want) continue;
-    if (!cur) { out.push({ op: "create", path: alloc(o), fm: want }); continue; }
+    const base = input.projected.get(o.uid);
+    if (!base) continue;
+    if (!cur) { out.push({ op: "create", path: alloc(o), fm: base }); continue; }
+    const p = input.pending.get(o.uid);
+    let want: ProjFm = base;
+    if (p?.state === "conflict" && p.conflict) want = { ...base, _sync: "conflict", _conflict: conflictOf(o.kind, p.conflict) } as ProjFm;
+    else if (p?.state === "failed") want = { ...base, _sync: "rejected", _sync_msg: p.lastError ?? "寫回失敗" };
     const d = diff(cur.fm!, want);
+    if (p?.state === "queued") {
+      // 使用者的修改還在送出途中：不蓋掉（review focus 2）
+      for (const k of Object.keys(d.set)) if (KEEP_WHILE_QUEUED.has(k)) delete (d.set as Record<string, unknown>)[k];
+      d.unset = d.unset.filter((k) => !KEEP_WHILE_QUEUED.has(k));
+    }
     if (Object.keys(d.set).length || d.unset.length) out.push(update(cur.path, d.set, d.unset));
   }
   return out;
