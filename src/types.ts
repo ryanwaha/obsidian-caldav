@@ -72,9 +72,15 @@ export interface PendingCreate {
 }
 
 /** 插件管理的欄位（§4.3）。date 為 null 表示清除日期。 */
-export interface Patch { summary?: string; done?: boolean; date?: { date: string; time?: string } | null }
+export interface Patch {
+  summary?: string; done?: boolean; date?: { date: string; time?: string } | null;
+  /** M6：任意 VTODO 狀態（小寫，例如 in-process） */
+  status?: string;
+  /** M6：VEVENT 的 DTEND（全天時呼叫端已換算成不含當天）；null 移除 */
+  end?: { date: string; time?: string } | null;
+}
 /** 衝突比對用：STATUS 原文、日期含形式與時區（"date-time|Asia/Taipei|20261124T150000"）。 */
-export interface Managed { summary: string; status: string; date?: string }
+export interface Managed { summary: string; status: string; date?: string; end?: string }
 
 /** 待送的修改：每個物件最多一筆（key 為 "upd:" + href），後來的修改合併進 patch。 */
 export interface PendingUpdate {

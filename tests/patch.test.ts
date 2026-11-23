@@ -144,3 +144,42 @@ describe("review fixes", () => {
     expect(a.date).not.toBe(b.date);
   });
 });
+
+describe("M6-2 patch: status values and event end", () => {
+  const todo = vcal("BEGIN:VTODO", "UID:a", "SUMMARY:x", "X-KEEP:1", "STATUS:NEEDS-ACTION", "END:VTODO");
+  test("status in-process replaces STATUS, keeps other lines", () => {
+    const u = unfold(applyPatch(todo, { status: "in-process" }, now));
+    expect(u).toContain("STATUS:IN-PROCESS");
+    expect(u).not.toContain("STATUS:NEEDS-ACTION");
+    expect(u).toContain("X-KEEP:1");
+  });
+  test("status completed adds COMPLETED and PERCENT-COMPLETE", () => {
+    const u = unfold(applyPatch(todo, { status: "completed" }, now));
+    expect(u).toContain("STATUS:COMPLETED");
+    expect(u).toContain("COMPLETED:20261119T090000Z");
+    expect(u).toContain("PERCENT-COMPLETE:100");
+  });
+  test("status needs-action from completed removes COMPLETED and PERCENT-COMPLETE", () => {
+    const done = applyPatch(todo, { status: "completed" }, now);
+    const u = unfold(applyPatch(done, { status: "needs-action" }, now));
+    expect(u).toContain("STATUS:NEEDS-ACTION");
+    expect(u).not.toMatch(/^COMPLETED:/m);
+    expect(u).not.toContain("PERCENT-COMPLETE");
+  });
+  test("status on recurring VTODO throws", () => {
+    const rec = vcal("BEGIN:VTODO", "UID:a", "SUMMARY:x", "DTSTART;VALUE=DATE:20261123", "RRULE:FREQ=WEEKLY", "END:VTODO");
+    expect(() => applyPatch(rec, { status: "completed" }, now)).toThrow();
+  });
+  const ev = vcal("BEGIN:VEVENT", "UID:e", "SUMMARY:會議", "DTSTAMP:20261119T000000Z", "DTSTART;TZID=Asia/Taipei:20261124T100000", "DTEND;TZID=Asia/Taipei:20261124T110000", "END:VEVENT");
+  test("end sets DTEND (timed, TZID Asia/Taipei), DTSTART unchanged", () => {
+    const u = unfold(applyPatch(ev, { end: { date: "2026-11-24", time: "12:30" } }, now));
+    expect(u).toContain("DTEND;TZID=Asia/Taipei:20261124T123000");
+    expect(u).toContain("DTSTART;TZID=Asia/Taipei:20261124T100000");
+  });
+  test("end all-day writes VALUE=DATE", () => {
+    const allDay = vcal("BEGIN:VEVENT", "UID:e", "SUMMARY:假", "DTSTAMP:20261119T000000Z", "DTSTART;VALUE=DATE:20261124", "DTEND;VALUE=DATE:20261125", "END:VEVENT");
+    expect(unfold(applyPatch(allDay, { end: { date: "2026-11-27" } }, now))).toContain("DTEND;VALUE=DATE:20261127");
+  });
+  test("end on VTODO throws", () => expect(() => applyPatch(todo, { end: { date: "2026-11-24" } }, now)).toThrow());
+  test("managedValues end", () => expect(managedValues(ev).end).toBe("date-time|Asia/Taipei|20261124T110000"));
+});

@@ -106,7 +106,9 @@ export function applyPatch(ics: string, patch: Patch, now: Date): string {
 
   // §4.3 在資料層也擋下（物件可能在修改送出前，被其他客戶端改成重複項目）
   if (hasOverrides || (!isTodo && recurring)) throw new Error("重複事件請在行事曆 App 修改");
-  if (isTodo && recurring && patch.done !== undefined) throw new Error("重複任務的完成請在提醒事項操作");
+  if (isTodo && recurring && (patch.done !== undefined || patch.status !== undefined)) throw new Error("重複任務的完成請在提醒事項操作");
+  if (patch.status !== undefined && !isTodo) throw new Error("事件沒有完成狀態");
+  if (patch.end !== undefined && isTodo) throw new Error("任務沒有結束時間");
   if (isTodo && recurring && patch.date === null) throw new Error("重複任務不能清除日期");
 
   const lines = ics.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
@@ -136,7 +138,18 @@ export function applyPatch(ics: string, patch: Patch, now: Date): string {
     }
   }
 
+  if (patch.status !== undefined && isTodo) {
+    remove("STATUS", "COMPLETED", "PERCENT-COMPLETE");
+    const st = patch.status.toUpperCase();
+    add.push(propLine("status", st));
+    if (st === "COMPLETED") add.push(utcLine("completed", now.getTime()), propLine("percent-complete", 100));
+  }
+
   let needTaipei = false;
+  if (patch.end !== undefined) {
+    remove("DTEND");
+    if (patch.end !== null) { add.push(dateLine("dtend", patch.end)); needTaipei = !!patch.end.time; }
+  }
   if (patch.date !== undefined) {
     const target = isTodo ? "DUE" : "DTSTART";
     const oldProp = comp.getFirstProperty(target.toLowerCase());
@@ -151,14 +164,14 @@ export function applyPatch(ics: string, patch: Patch, now: Date): string {
       remove(target);
       add.push(dateLine(target.toLowerCase(), patch.date));
       if (startFollows) { remove("DTSTART"); add.push(dateLine("dtstart", patch.date)); }
-      needTaipei = !!patch.date.time;
+      needTaipei = needTaipei || !!patch.date.time;
       if (oldEpoch !== undefined) {
         const delta = newEpoch - oldEpoch;
         const formChanged = (oldProp!.type === "date") !== !patch.date.time;
         // 形式改變時比照 iOS：有時間提醒在到期時，全天提醒在當天 09:00；否則平移
         const to = formChanged ? (patch.date.time ? newEpoch : newEpoch + 9 * 3600_000) : undefined;
         shiftAlarms(lines, start, end, delta, to, replaceLines);
-        const endProp = !isTodo ? comp.getFirstProperty("dtend") : null;
+        const endProp = !isTodo && patch.end === undefined ? comp.getFirstProperty("dtend") : null;
         if (endProp) {
           const endEpoch = epochOf(endProp, zones);
           remove("DTEND");
@@ -219,5 +232,7 @@ export function managedValues(ics: string): Managed {
   };
   const prop = comp.getFirstProperty(isTodo ? "due" : "dtstart");
   if (prop) out.date = `${prop.type}|${prop.getParameter("tzid") ?? ""}|${raw(prop)}`;
+  const endProp = isTodo ? null : comp.getFirstProperty("dtend");
+  if (endProp) out.end = `${endProp.type}|${endProp.getParameter("tzid") ?? ""}|${raw(endProp)}`;
   return out;
 }
