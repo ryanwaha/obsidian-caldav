@@ -44,6 +44,17 @@ describe("SessionManager", () => {
     expect(calls.filter((c) => c.method === "REPORT")).toHaveLength(2);
   });
 
+  test("onReport：每一輪完成都通知，包括進行中被要求而補跑的那一輪", async () => {
+    const { m } = manager();
+    const seen: number[] = [];
+    m.onReport = (r) => { seen.push(r.startedAt); };
+    const p1 = m.sync(cfg());
+    void m.sync(cfg()); // 進行中被要求 → 結束後補跑一輪
+    await p1;
+    await new Promise((r) => setTimeout(r, 200));
+    expect(seen).toHaveLength(2);
+  });
+
   test("網址只差結尾斜線視為同一台伺服器", async () => {
     const { m, made } = manager();
     await m.sync(cfg("https://cal.example"));

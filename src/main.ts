@@ -21,6 +21,7 @@ import { requestUrlTransport } from "./caldav/requestUrlTransport";
 import { type Config, SessionManager } from "./session";
 import { CalDavSettingTab, DEFAULT_SETTINGS, SECRET_ID, type Settings } from "./settings";
 import { SyncEngine } from "./sync/engine";
+import { ProjectionWriter } from "./projection/writer";
 import { type CalObject, type CollectionInfo, type Patch, type PendingUpdate, type SyncReport, isUpdate } from "./types";
 
 export default class CalDavPlugin extends Plugin {
@@ -30,6 +31,7 @@ export default class CalDavPlugin extends Plugin {
     return { cache, engine: new SyncEngine(new CalDavClient(cfg.serverUrl, basicAuth(cfg.username, cfg.password), requestUrlTransport()), cache) };
   });
   private intervalId?: number;
+  readonly projection = new ProjectionWriter(this.app, async () => (await this.sessions.get(this.config()).catch(() => undefined))?.cache, () => this.settings.projectCollections);
   private lastReport?: SyncReport;
   readonly index = new MemoryIndex();
   readonly backlinks = new BacklinkIndex();
@@ -41,6 +43,12 @@ export default class CalDavPlugin extends Plugin {
 
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.sessions.onReport = () => {
+      if (this.settings.mode !== "server") return;
+      void this.projection.reconcile().then((p) => {
+        if (p.created || p.updated || p.renamed || p.merged) console.info("[obsidian-caldav] 投影", p);
+      });
+    };
     this.addSettingTab(new CalDavSettingTab(this.app, this));
     this.addCommand({ id: "sync-now", name: "立即同步", callback: () => void this.syncNow(true) });
     this.addCommand({ id: "insert-ref", name: "插入任務／事件參照", editorCallback: (editor) => this.insertRef(editor) });
@@ -57,6 +65,7 @@ export default class CalDavPlugin extends Plugin {
     this.registerDomEvent(document, "resume" as keyof DocumentEventMap, () => this.foregroundSync("resume"));
     this.registerEvent(this.app.workspace.on("file-open", () => this.foregroundSync("file-open")));
     this.app.workspace.onLayoutReady(async () => {
+      if (this.settings.mode === "server") ProjectionWriter.setPropertyTypes(this.app);
       this.resetInterval();
       await this.reloadIndex(); // 先顯示快取（離線也可用），再同步
       this.watchVault();
